@@ -14,11 +14,14 @@ export function extractSearchDom() {
 }
 export function extractDetailDom() {
   const root=document.querySelector('.job-banner')??document.querySelector('.job-detail');
+  const description=document.querySelector<HTMLElement>('.job-sec-text, .job-detail .job-description');
   const recruiter=document.querySelector('.job-boss-info .name')?.cloneNode(true) as Element|undefined;
   for(const status of recruiter?.querySelectorAll('.boss-online-tag,.boss-active-time')??[])status.remove();
   return {
     title: document.querySelector('.job-banner .name h1, .job-detail .job-name, .job-detail .job-title')?.textContent?.trim() ?? '',
-    jdText: document.querySelector('.job-sec-text, .job-detail .job-description')?.textContent?.trim() ?? '',
+    // Read the rendered description. textContent also includes hidden, changing page labels.
+    // Do not strip brand words: they can be legitimate visible job requirements.
+    jdText: description?.innerText.replace(/\r\n?/g,'\n').trim() ?? '',
     recruiterId: document.querySelector('[data-boss-id]')?.getAttribute('data-boss-id') ?? null,
     recruiterName: recruiter?.textContent?.trim().slice(0,80)??'',
     alreadyContacted: [...(root?.querySelectorAll('a,button')??[])].some(node => !node.closest('.more-job-section,.job-card-wrapper,.job-card-box')&&node.getClientRects().length>0&&/^(继续沟通|已沟通)$/.test(node.textContent?.trim() ?? '')),

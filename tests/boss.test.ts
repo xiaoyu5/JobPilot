@@ -32,6 +32,22 @@ test('BOSS DOM fixtures extract twenty cards and JD, identify login/challenges, 
     const blank=await detectLoginState(page,true);assert.equal(blank.state,'UNKNOWN');assert(blank.message.includes('空白'));
   } finally {await browser.close();}
 });
+test('JD snapshots exclude changing hidden labels and retain visible requirements',async()=>{
+  const browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});
+  try{
+    const page=await browser.newPage();
+    const visible='负责 iOS 客户端；了解 BOSS 直聘和 kanzhun 品牌。';
+    for(const modern of [false,true]){
+      const description=(label:string)=>`<div class="job-banner"><div class="name"><h1>匿名 iOS 工程师</h1></div></div><div class="job-detail"><div class="${modern?'job-description':'job-sec-text'}">负责 <span style="display:none">${label}</span>iOS 客户端；了解 BOSS 直聘和 kanzhun 品牌。<span style="visibility:hidden">随机文字</span></div></div>`;
+      await page.setContent(description('BOSS直聘'));
+      const first=await page.evaluate(extractDetailDom);assert.equal(first.jdText,visible);
+      await page.setContent(description('kanzhunboss'));
+      assert.equal((await page.evaluate(extractDetailDom)).jdText,first.jdText);
+      await page.locator(modern?'.job-description':'.job-sec-text').evaluate(node=>node.append(document.createTextNode(' 需要 Swift 实际开发经验。')));
+      assert.notEqual((await page.evaluate(extractDetailDom)).jdText,first.jdText,'visible requirement changes must still invalidate matching');
+    }
+  }finally{await browser.close();}
+});
 test('native Chrome ownership rejects daily profiles, path prefixes and other executables',()=>{
  const path='/tmp/JobPilot/chrome-profile',chrome='/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
  assert(ownsChromeCommand(`${chrome} --user-data-dir=${path} --no-first-run`,path));

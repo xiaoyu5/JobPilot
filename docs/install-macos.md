@@ -1,15 +1,15 @@
 # JobPilot macOS 安装说明
 
-当前版本：0.4.0 预发行版，支持 macOS 13 及以上的 Apple Silicon Mac（M 系列）。Intel Mac 暂不支持。App 自带 Node，无需安装 Node、Rust 或单独运行服务器；BOSS 功能需要自行安装 Google Chrome。
+当前版本：0.4.1 预发行版，支持 macOS 13 及以上的 Apple Silicon Mac（M 系列）。Intel Mac 暂不支持。App 自带 Node，无需安装 Node、Rust 或单独运行服务器；BOSS 功能需要自行安装 Google Chrome。
 
 ## 下载与安装
 
-从 <https://github.com/xiaoyu5/JobPilot/releases> 下载 `JobPilot_0.4.0_aarch64.dmg` 和 `SHA256SUMS.txt`。如需只读连接扩展，另下载 `JobPilot_BOSS_Reader_0.1.2.zip`。
+从 <https://github.com/xiaoyu5/JobPilot/releases> 下载 `JobPilot_0.4.1_aarch64.dmg` 和 `SHA256SUMS.txt`。如需只读连接扩展，另下载 `JobPilot_BOSS_Reader_0.1.2.zip`。
 
 可在下载目录核对 DMG 的 SHA-256：
 
 ```sh
-shasum -a 256 JobPilot_0.4.0_aarch64.dmg
+shasum -a 256 JobPilot_0.4.1_aarch64.dmg
 ```
 
 结果应与同一发行版 `SHA256SUMS.txt` 中对应文件的一行相同。打开 DMG，将 JobPilot 拖到“应用程序”目录，再从 Finder 启动。更新前退出旧版应用，替换 App 即可；用户数据位于 `~/Library/Application Support/io.jobpilot.desktop`，不在 App 内。
@@ -32,6 +32,8 @@ shasum -a 256 JobPilot_0.4.0_aarch64.dmg
 ## 当前验收范围
 
 默认 Preview，真实发送、首联 Auto 和聊天 Auto 均关闭。只读采集、模型匹配、草稿审核、已有会话分类、复盘及数据管理已有验证；真实首联、真实回复和 Auto 仍待最终验收。本预发行版不宣称真实发送已通过。
+
+审核队列若显示“版本已失效”，点击该条底部的“重新匹配并生成草稿”，等待回到“待你审核”，核对后点“标记已审核”，再点“发送前检查（1）”。这个按钮只显示确认窗口；括号中的 1 表示一个岗位，首次沟通的最终确认会显示两条消息。
 
 “立即沟通”一经点击，平台就会自动发送默认招呼。随后发送 AI 文案会形成两条消息。已有会话若已拒绝则停止联系，等待对方回复时不重复追问。启用任何真实发送前，请在 App 中核对目标、文案、时段和额度。
 

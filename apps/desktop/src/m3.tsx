@@ -10,7 +10,7 @@ function ConfirmDialog({plan,disabled,close,act,done}:{plan:SendPlan;disabled:bo
 }
 export function SendBatch({ids,disabled,act,changed}:{ids:string[];disabled:boolean;act:Act;changed:()=>Promise<void>}){
   const [plan,setPlan]=useState<SendPlan>();
-  return <><button className="secondary" disabled={disabled||!ids.length} onClick={()=>act('prepare-send',async()=>setPlan(await request<SendPlan>('send.prepare',{queueIds:ids})))}>检查发送条件（{ids.length}）</button>{plan&&<ConfirmDialog plan={plan} disabled={disabled} close={()=>setPlan(undefined)} act={act} done={changed}/>}</>;
+  return <><button className="secondary" disabled={disabled||!ids.length} onClick={()=>act('prepare-send',async()=>setPlan(await request<SendPlan>('send.prepare',{queueIds:ids})))}>发送前检查（{ids.length}）</button>{plan&&<ConfirmDialog plan={plan} disabled={disabled} close={()=>setPlan(undefined)} act={act} done={changed}/>}</>;
 }
 export function InspectCommunication({queueId,disabled,act}:{queueId:string;disabled:boolean;act:Act}){
   const [message,setMessage]=useState('');

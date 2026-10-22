@@ -101,7 +101,7 @@ try {
   client = new Client({name: 'jobpilot-bundle-check', version: '0.0.1'});
   await client.connect(new StdioClientTransport({command: node, args: [script, '--mode', 'mcp', '--data-dir', dir], env: {PATH: '/usr/bin:/bin'}}));
   await client.ping();
-  assert.equal(client.getServerVersion()?.version,'0.4.0');
+  assert.equal(client.getServerVersion()?.version,'0.4.1');
   const tools=await client.listTools();assert.equal(tools.tools.length,10);assert(!tools.tools.some(tool=>/commit|authorize|reset|restore|export/.test(tool.name)));
   const result = await client.callTool({name: 'jobpilot.status', arguments: {}});
   assert.equal(JSON.parse((result.content[0] as {text: string}).text).data.pid, first.pid);
