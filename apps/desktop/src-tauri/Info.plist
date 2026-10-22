@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>NSAppleEventsUsageDescription</key><string>JobPilot 通过 Chrome 原生接口读取你授权的专用 BOSS 窗口中的岗位和会话消息；只有另行启用真实发送并确认具体文案或 Auto 规则后，才会提交招呼语。</string>
+</dict></plist>

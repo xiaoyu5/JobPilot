@@ -1,0 +1,51 @@
+{
+  "name": "jobpilot",
+  "version": "0.4.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": "22.23.2"
+  },
+  "scripts": {
+    "build:worker": "node scripts/build-worker.mjs",
+    "build:ui": "npm run build --workspace @jobpilot/desktop",
+    "build": "npm run build:worker && npm run build:ui",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build",
+    "worker": "node dist/worker/index.mjs --mode worker",
+    "mcp": "node dist/worker/index.mjs --mode mcp",
+    "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "desktop:dev": "node scripts/prepare-browser.mjs && node scripts/tauri.mjs dev",
+    "desktop:build": "node scripts/prepare-browser.mjs && node scripts/tauri.mjs build --target aarch64-apple-darwin --bundles app,dmg",
+    "smoke": "node --import tsx scripts/smoke.ts",
+    "verify:bundle": "node --import tsx scripts/verify-bundle.ts",
+    "verify:installer": "node scripts/verify-installer.mjs",
+    "smoke:m1": "node --import tsx scripts/m1-smoke.ts",
+    "verify:ui": "node --import tsx scripts/m1-ui-smoke.ts",
+    "pretest": "node scripts/build-browser-snapshot.mjs",
+    "smoke:m2": "node --import tsx scripts/m2-smoke.ts",
+    "smoke:m3": "node --import tsx scripts/m3-smoke.ts",
+    "verify:ui:m2": "node --import tsx scripts/m2-ui-smoke.ts",
+    "verify:ui:m3": "node --import tsx scripts/m3-ui-smoke.ts",
+    "verify:ui:chat": "node --import tsx scripts/chat-ui-smoke.ts",
+    "verify:ui:m4": "node --import tsx scripts/m4-ui-smoke.ts",
+    "verify:bundle:m4": "node --import tsx scripts/m4-bundle-smoke.ts",
+    "release:prepare": "node scripts/prepare-release.mjs"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.3.1",
+    "@tauri-apps/cli": "2.12.4",
+    "@types/node": "26.6.5",
+    "@types/proper-lockfile": "4.1.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2"
+  }
+}

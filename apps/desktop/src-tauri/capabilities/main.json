@@ -1,0 +1,1 @@
+{"identifier":"main","description":"M0 本地窗口权限；不开放 shell、网络或任意文件访问给 WebView。","windows":["main"],"permissions":["core:default"]}

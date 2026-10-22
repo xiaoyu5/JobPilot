@@ -1,0 +1,4 @@
+const output=document.querySelector('#result');
+async function current(){const [tab]=await chrome.tabs.query({active:true,currentWindow:true});if(!tab?.id||new URL(tab.url).origin!=='https://www.zhipin.com')throw new Error('请先切换到专用 Chrome 的 BOSS 标签页。');return tab.id;}
+document.querySelector('#connect').onclick=async()=>{try{const tabId=await current();const results=await chrome.scripting.executeScript({target:{tabId},world:'MAIN',files:['bridge.js']});output.textContent=JSON.stringify(results[0]?.result??{connected:true},null,2);}catch(error){output.textContent=String(error);}};
+document.querySelector('#stop').onclick=async()=>{try{const tabId=await current();await chrome.scripting.executeScript({target:{tabId},world:'MAIN',func:()=>{window.__JobPilotReadonlyBridge_v1__?.stop();}});output.textContent='已断开；已移除本扩展标记。';}catch(error){output.textContent=String(error);}};

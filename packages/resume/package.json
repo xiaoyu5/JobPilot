@@ -1,0 +1,1 @@
+{"name":"@jobpilot/resume","version":"0.0.1","private":true,"type":"module","exports":"./src/index.ts","dependencies":{"@jobpilot/contracts":"*","mammoth":"1.13.0","unpdf":"1.9.1","pdfjs-dist":"6.4.299","fflate":"0.8.3"}}

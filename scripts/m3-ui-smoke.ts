@@ -1,0 +1,35 @@
+import assert from 'node:assert/strict';
+import {chromium} from 'playwright-core';
+import {mkdtemp,mkdir,rm} from 'node:fs/promises';
+import {randomBytes} from 'node:crypto';
+import {Store} from '@jobpilot/store';
+import type {SendTransport} from '../packages/core/src/sending.js';
+import {startWorker} from '../packages/worker/src/server.js';
+import {callWorker} from '../packages/worker/src/client.js';
+import {withModel,goodResponse} from '../tests/m2-fixtures.js';
+import {seedSendQueue} from '../tests/m3-fixtures.js';
+await withModel(goodResponse,async config=>{
+  const dir=await mkdtemp('/tmp/jp-m3-ui-'),store=new Store(dir);await seedSendQueue(store,config);store.close();
+  let submitted=0,now=Date.parse('2026-10-22T10:00:00Z');const guiToken=randomBytes(32).toString('hex');
+  const transport:SendTransport={inspectCommunication:async job=>({job,inspection:{jobId:job.id,recruiterId:job.recruiterId,identityBound:true,composerReady:true,canOpenPreview:false,alreadyContacted:false,message:'anonymous editor',url:job.url,adapterVersion:'fixture'}}),prepareGreeting:async()=>{},submitGreeting:async()=>{submitted++;},verifyGreeting:async()=>{now+=15000;return submitted===1?{state:'CONFIRMED',messageId:'fixture-confirmed-1',message:'visible fixture confirmation'}:{state:'UNKNOWN',message:'unconfirmed fixture'};}};
+  const worker=await startWorker(dir,{guiToken,application:{transport,health:async()=>true,clock:()=>now}}),browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});
+  try{
+    const errors:string[]=[],page=await browser.newPage({viewport:{width:1440,height:1000}});page.on('pageerror',e=>errors.push(e.message));
+    await page.exposeBinding('__jobpilotInvoke',async(_s,command:string,args:any)=>{if(command!=='worker_request')throw new Error('unexpected native command');return callWorker(dir,args.action,args.payload,190000,['send.policy.save','send.auto.set','send.commit','send.reset','send.resume','send.cancel','send.resolve'].includes(args.action)?guiToken:undefined);});
+    await page.addInitScript('window.__TAURI_INTERNALS__={invoke:(command,args)=>window.__jobpilotInvoke(command,args)};');
+    await page.goto('http://127.0.0.1:1420/#/settings');await page.getByText('● 本机已连接',{exact:true}).waitFor();
+    await page.getByLabel('允许真实发送',{exact:true}).check();await page.getByLabel('发送时区',{exact:true}).fill('UTC');await page.getByLabel('允许开始时间').fill('00:00');await page.getByLabel('允许结束时间').fill('23:59');await page.getByLabel('确认发送限制').check();await page.getByRole('button',{name:'保存发送规则',exact:true}).click();
+    await page.getByRole('button',{name:'启用本次会话 Auto…',exact:true}).waitFor();assert.equal(submitted,0);
+    await page.getByRole('link',{name:'☷ 审核队列',exact:true}).click();
+    await page.locator('.queue-card').filter({hasText:'匿名待发岗位 1'}).getByRole('button',{name:'检查发送条件（1）',exact:true}).click();
+    const dialog=page.getByRole('dialog');await dialog.getByRole('heading',{name:'检查最终文案与接收岗位'}).waitFor();assert.equal(submitted,0);assert(await dialog.getByRole('button',{name:'确认发送 1 条',exact:true}).isDisabled());
+    await dialog.getByRole('checkbox').check();await dialog.getByRole('button',{name:'确认发送 1 条',exact:true}).click();await page.getByText('页面已确认',{exact:true}).waitFor({timeout:15000});assert.equal(submitted,1);
+    await page.locator('.queue-card').filter({hasText:'匿名待发岗位 2'}).getByRole('button',{name:'检查发送条件（1）',exact:true}).click();await dialog.getByRole('checkbox').check();await dialog.getByRole('button',{name:'确认发送 1 条',exact:true}).click();await page.getByText('待人工核验',{exact:true}).waitFor({timeout:15000});assert.equal(submitted,2);
+    await mkdir('.local/qa',{recursive:true});await page.screenshot({path:'.local/qa/m3-queue-and-verify.png',fullPage:true});
+    const uncertain=page.locator('.delivery-panel .send-preview').filter({hasText:'待人工核验'});await uncertain.getByRole('checkbox').check();await uncertain.getByRole('button',{name:'未发出并跳过，保留去重锁',exact:true}).click();await page.getByText('未发出，已跳过',{exact:true}).waitFor();assert.equal(submitted,2);
+    await page.getByRole('button',{name:'急停 ⌘.',exact:true}).click();await page.getByRole('link',{name:'⚙ 设置',exact:true}).click();await page.getByRole('button',{name:'解除急停（不启用 Auto）',exact:true}).waitFor();
+    await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:'.local/qa/m3-settings-dark.png',fullPage:true});await page.setViewportSize({width:900,height:900});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+    assert.deepEqual(errors,[]);assert.equal((await callWorker(dir,'send.status')).data&&(await callWorker(dir,'send.status')).ok,true);
+    console.log('PASS M3 UI: GUI capability, policy confirmation, exact final-text dialog, one confirmed send and one uncertain simulated send, manual reconciliation without resending, emergency stop, dark/narrow layouts. All recipients and browser writes are anonymous fixtures.');
+  }finally{await browser.close();await worker.close();await rm(dir,{recursive:true,force:true});}
+});

@@ -1,0 +1,1 @@
+{"name":"@jobpilot/worker","version":"0.0.1","private":true,"type":"module","exports":"./src/server.ts","dependencies":{"@jobpilot/contracts":"*","@jobpilot/llm":"*","@jobpilot/boss-adapter":"*","@jobpilot/mcp":"*","@jobpilot/store":"*","@jobpilot/resume":"*","proper-lockfile":"4.1.2","@jobpilot/core":"*"}}
