@@ -197,6 +197,7 @@ async fn worker_request(
         "config.update",
         "resume.import",
         "resume.list",
+        "resume.add",
         "resume.update",
         "resume.freeze",
         "search.get",

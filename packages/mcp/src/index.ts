@@ -7,7 +7,7 @@ type McpAction = 'status' | 'run.start' | 'jobs.list' | 'run.get' | 'run.pause' 
 
 export function startMcp(call: (action: McpAction, payload?: unknown) => Promise<Envelope>) {
   return serveStdio(() => {
-    const server = new McpServer({name: 'jobpilot', version: '0.4.1'});
+    const server = new McpServer({name: 'jobpilot', version: '0.4.2'});
     const invoke = async (action: McpAction, payload?: unknown) => {
       let result: Envelope;
       try { result = await call(action, payload); }

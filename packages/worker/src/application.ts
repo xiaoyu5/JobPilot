@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import {FactAdd} from '@jobpilot/contracts';
 import { AppError, AnalyzeInput, ConfigUpdate, DraftInput, DraftUpdate, DryRunInput, FactUpdate, JobListQuery, QueueInput, QueueList, QueueReview, ResumeImport, SearchProfile, StartRun,SendSelection,SendCommit,SendResolve, type Request, type JobSource, type JobRecord, type WorkerStatus, type LlmConfiguration } from '@jobpilot/contracts';
 import { Store,listOutcomes,updateOutcome,conversionStats } from '@jobpilot/store';
 import {OutcomeList,OutcomeUpdate,StatsQuery} from '@jobpilot/contracts';
@@ -214,6 +215,7 @@ export class Application {
         finally { this.importing = false; }
       }
       case 'resume.list': return this.store.resume();
+      case 'resume.add': return this.store.addFact(FactAdd.parse(payload));
       case 'resume.update': return this.store.updateFact(FactUpdate.parse(payload));
       case 'resume.freeze': return this.store.freezeResume(z.object({expectedVersion: z.number().int().min(1)}).strict().parse(payload).expectedVersion);
       case 'search.get': return this.store.getSearch();

@@ -6,7 +6,7 @@ export const RpcRequest = z.object({
   token: z.string().regex(/^[a-f0-9]{64}$/),
   guiToken: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   action: z.enum(['status', 'browser.open', 'browser.close', 'llm.test', 'run.start', 'shutdown',
-    'config.get', 'config.validate', 'config.update', 'resume.import', 'resume.list', 'resume.update', 'resume.freeze',
+    'config.get', 'config.validate', 'config.update', 'resume.import', 'resume.list', 'resume.add', 'resume.update', 'resume.freeze',
     'search.get', 'search.save', 'jobs.list', 'jobs.get', 'jobs.read', 'boss.login.open', 'boss.login.status',
     'run.list', 'run.get', 'run.pause', 'demo.load', 'dashboard.get', 'boss.diagnostics',
     'policy.get', 'policy.save', 'analysis.get', 'analysis.analyze', 'draft.generate', 'draft.update',
@@ -38,6 +38,7 @@ export type PendingFact = {text: string; category: FactCategoryName; source: Fac
 export type ResumeFact = PendingFact & {id: string; approved: boolean; version: number; updatedAt: string};
 export type ResumeState = {version: number; frozenVersion: number | null; facts: ResumeFact[]; approvedCount: number};
 export const ResumeImport = z.object({path: z.string().min(1).max(4096)}).strict();
+export const FactAdd = z.object({expectedVersion:z.number().int().min(1),text:z.string().trim().min(5).max(2000),category:FactCategory.default('skill'),sourceQuote:z.string().trim().min(1).max(4000).optional()}).strict();
 export const FactUpdate = z.object({id: z.string().uuid(), expectedVersion: z.number().int().min(1), text: z.string().trim().min(1).max(2000).optional(), category: FactCategory.optional(), approved: z.boolean().optional(), deleted: z.boolean().optional()}).strict();
 export const SearchProfile = z.object({id: z.literal('primary').default('primary'), name: z.string().trim().min(1).max(80), keyword: z.string().trim().min(1).max(80), searchUrl: z.string().max(2048).default(''), maxJobs: z.number().int().min(1).max(50).default(20)}).strict();
 export type SearchProfileData = z.infer<typeof SearchProfile>;

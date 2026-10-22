@@ -37,6 +37,15 @@ await withModel(goodResponse,async config=>{
     await page.getByRole('link',{name:'☷ 审核队列',exact:true}).click();await page.getByText('版本已失效',{exact:true}).first().waitFor();
     await page.emulateMedia({colorScheme:'dark'});await page.screenshot({path:'.local/qa/m2-queue-dark.png',fullPage:true});
     await page.setViewportSize({width:900,height:900});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
+    await page.getByRole('link',{name:'▧ 简历事实库',exact:true}).click();
+    await page.locator('summary').filter({hasText:'补充一条真实事实'}).click();
+    await page.getByLabel('补充事实内容',{exact:true}).fill('能够独立完成匿名App开发并发布上线。');
+    await page.getByLabel('补充事实类别',{exact:true}).selectOption('experience');
+    await page.getByRole('button',{name:'添加待审核事实',exact:true}).click();
+    await page.getByText('已补充待审核事实，请核对后确认并重新冻结。',{exact:true}).waitFor();
+    const facts=(await callWorker(dir,'resume.list')).data as any,added=facts.facts.find((f:any)=>f.text==='能够独立完成匿名App开发并发布上线。');
+    assert(added);assert.equal(added.approved,false);assert.equal(added.source.kind,'text');assert.equal(facts.frozenVersion,null);
+    await page.screenshot({path:'.local/qa/m4.2-manual-fact-dark.png',fullPage:true});assert(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth));
     assert.deepEqual(errors,[]);assert.equal((await callWorker(dir,'status')).data && (await callWorker(dir,'status')).ok,true);
     console.log('PASS M2 UI: actual Worker/model fixture, matching evidence, audited draft, local review, edited-claim block, Dry Run timeline, policy invalidation, dark/narrow layouts; no page errors.');
   }finally{await browser.close();await worker.close();await rm(dir,{recursive:true,force:true});}

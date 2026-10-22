@@ -157,6 +157,17 @@ export class Store {
     });
     return this.resume();
   }
+  addFact(input:{expectedVersion:number;text:string;category:PendingFact['category'];sourceQuote?:string}) {
+    if(this.resume().version!==input.expectedVersion)throw new AppError('VERSION_CONFLICT','事实库已更新，请刷新后补充。');
+    const text=redact(input.text),quote=redact(input.sourceQuote??input.text),facts=this.resume().facts;
+    if(facts.some(fact=>fact.text===text&&fact.category===input.category))return this.resume();
+    if(facts.length>=500||facts.reduce((n,f)=>n+f.text.length+f.source.quote.length,0)+text.length+quote.length>350000)throw new AppError('FACT_LIMIT','事实库条目或文本总量达到上限。');
+    this.transaction(()=>{
+      this.bumpResume();
+      this.db.prepare('INSERT INTO resume_facts VALUES(?,?,?,?,0,1,0,?)').run(randomUUID(),text,input.category,JSON.stringify({file:'用户补充',kind:'text',paragraph:1,quote}),now());
+    });
+    return this.resume();
+  }
   updateFact(input: {id: string; expectedVersion: number; text?: string; category?: string; approved?: boolean; deleted?: boolean}) {
     this.transaction(() => {
       const row = this.db.prepare('SELECT * FROM resume_facts WHERE id=? AND deleted=0').get(input.id) as Row | undefined;

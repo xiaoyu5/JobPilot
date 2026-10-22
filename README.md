@@ -1,6 +1,6 @@
 # JobPilot
 
-本地运行的 AI 求职工作台，产品范围见 [产品说明](docs/product-scope.md)。当前为 **M4 / 0.4.1，预发行版**：包含真实登录/只读采集、事实匹配和草稿审核、受控首联与已有会话回复、复盘统计、脱敏诊断、私密备份恢复及数据清理。默认 Preview，真实发送与两种 Auto 关闭。按用户决定，真实发送统一留到全部功能完成后的最终验收，先匹配岗位，再确认“立即沟通 → 默认招呼 → AI 文案”，审核队列失效恢复及正文读取修复见 [0.4.1 验证记录](docs/m4.1-validation.md)。详见 [ADR-0009](docs/adr/0009-final-live-acceptance.md) 和 [M4 验证记录](docs/m4-validation.md)。M3 功能与匿名验证已完成，真实只读证据见 [标识关联与幂等验证](docs/m3.3-validation.md)。
+本地运行的 AI 求职工作台，产品范围见 [产品说明](docs/product-scope.md)。当前为 **M4 / 0.4.2，预发行版**：包含真实登录/只读采集、事实匹配和草稿审核、受控首联与已有会话回复、复盘统计、脱敏诊断、私密备份恢复及数据清理。默认 Preview，真实发送与两种 Auto 关闭。按用户决定，真实发送统一留到全部功能完成后的最终验收，先匹配岗位，再确认“立即沟通 → 默认招呼 → AI 文案”，应用层匹配与事实补充见 [0.4.2 验证记录](docs/m4.2-validation.md)，正文稳定性修复见 [0.4.1 记录](docs/m4.1-validation.md)。详见 [ADR-0009](docs/adr/0009-final-live-acceptance.md) 和 [M4 验证记录](docs/m4-validation.md)。M3 功能与匿名验证已完成，真实只读证据见 [标识关联与幂等验证](docs/m3.3-validation.md)。
 
 **真实 BOSS 登录与 20 个岗位/JD 的只读采集已通过。** 使用专用 Profile 的普通 Chrome 和 macOS 原生接口，配置与数据保存在本机。验证证据见 [M1 验证记录](docs/m1-validation.md)，权限与实现见 [ADR-0004](docs/adr/0004-boss-native-chrome.md)。
 
@@ -27,7 +27,7 @@ npm run verify:bundle
 npm run verify:installer
 ```
 
-产物在 `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/`。构建后执行 `npm run release:prepare`，检查 DMG、包内版本与签名结构、捆绑 Node 和扩展权限，将 DMG、只读扩展 ZIP、安装说明及校验清单汇集至 `.local/releases/0.4.1/`。此命令不启动 App、不连接 BOSS，也不上传文件；已存在的发行目录不会覆盖。源码与发行准备说明见 [GitHub 发布](docs/github-release.md)。
+产物在 `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/`。构建后执行 `npm run release:prepare`，检查 DMG、包内版本与签名结构、捆绑 Node 和扩展权限，将 DMG、只读扩展 ZIP、安装说明及校验清单汇集至 `.local/releases/0.4.2/`。此命令不启动 App、不连接 BOSS，也不上传文件；已存在的发行目录不会覆盖。源码与发行准备说明见 [GitHub 发布](docs/github-release.md)。
 
 `verify:installer` 校验并以只读方式挂载 DMG，将 App 复制到临时目录，再运行发布包检查；不会写入 `/Applications`。这不替代干净用户环境和 Gatekeeper 验收。
 
