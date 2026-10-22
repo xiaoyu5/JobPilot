@@ -39,6 +39,14 @@ GitHub 分发准备新增 `release:prepare`：最终 DMG 完整性、内部 App 
 
 候选准备只调用本机数据与模型，没有导航到真实岗位或点击“立即沟通”，没有编辑/提交聊天消息。所有真实发送和 Auto 保持关闭，两种 Outbox 均为 0。证据在 gitignored `.local/qa/m4-final-candidate.json` 和 `.local/qa/m4-final-state.json`。最终目标身份、最终文字和额度仍须在应用内核对确认。
 
+后续 GitHub 发行轮次正常打开已安装 App，真实 BOSS 登录为 `LOGGED_IN`。同一候选只读页面预检返回 `instant-send`、身份可绑定、招聘人已知、尚未沟通，未点击入口。刷新 JD 后原草稿按设计失效，重新调用当前 Cockpit 匹配为 **83 分 / RECOMMEND / 硬缺口 0**，生成审计 PASS 的新草稿，加入 PENDING 队列，没有代用户审核或修改事实；首联及回复意图仍为 0。证据为 `.local/qa/m4-final-preflight.json` 及更新的 `m4-final-candidate.json`。
+
+## GitHub 预发行验证
+
+2026-10-22，首次公开源码提交 `f633665` 已推送到 `main`，标签 `v0.4.0` 指向该提交。[预发行版](https://github.com/xiaoyu5/JobPilot/releases/tag/v0.4.0) 已发布，`isPrerelease=true`、`isDraft=false`，未设为正式最新版。144 个源文件的提交检查未发现私人数据文件、密钥格式或个人绝对路径；原始需求、实际 `.env`、数据库、Profile 和本机证据均不在 Git 树中。公开 Markdown 的本地链接检查通过。
+
+从 GitHub 重新下载全部六个附件，逐文件与本机及 SHA-256 清单一致；DMG 哈希保持上述值。扩展 ZIP 仅含预期的五个文件及根目录，manifest 权限仍仅 `activeTab` / `scripting`。证据在 gitignored `.local/qa/github-v0.4.0-verified.json`。这证明附件上传和下载一致，不代表在独立干净 Mac 上安装、Gatekeeper 默认放行或真实发送通过。
+
 ## 最终待验收
 
 真实“立即沟通 → 平台默认招呼 → AI 文案”、已有会话新提问回复及所选 Auto 均留至功能完成后，按具体目标与最终文案在 GUI 确认。当前按 [ADR-0011](adr/0011-github-dmg-distribution.md) 采用 GitHub DMG 分发，Developer ID 签名、公证及默认 Gatekeeper 验证为可选改进；干净环境仍单列待验收，开发机检查不代替独立环境实测。
