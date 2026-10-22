@@ -13,7 +13,8 @@ export const RpcRequest = z.object({
     'queue.list', 'queue.add', 'queue.review', 'queue.remove', 'dryrun.start', 'llm.env.load','llm.env.save',
     'send.status','send.policy.save','send.auto.set','send.prepare','send.commit','send.stop','send.resume',
     'send.outbox','send.verify','send.resolve','send.reset','send.cancel','send.checkpoint','boss.communication.inspect','chat.open','chat.scan','chat.list','chat.prepare','chat.commit','chat.auto.set','chat.auto.tick','chat.outbox','chat.resolve',
-    'outcomes.list','outcomes.update','stats.get','diagnostics.export','data.status','data.backup','data.restore.prepare','data.restore.commit','data.reset','data.cleanup.preview','data.cleanup.commit','data.retention.save','data.operation.cancel']),
+    'outcomes.list','outcomes.update','stats.get','diagnostics.export','data.status','data.backup','data.restore.prepare','data.restore.commit','data.reset','data.cleanup.preview','data.cleanup.commit','data.retention.save','data.operation.cancel',
+    'notifications.status','notifications.save','notifications.test','notifications.check']),
   payload: z.unknown().optional(),
 }).strict();
 export type Request = z.infer<typeof RpcRequest>;
@@ -31,6 +32,10 @@ export type LlmConfiguration = z.infer<typeof LlmConfig>;
 export const LlmSettings = LlmConfig.omit({apiKey: true}).strict();
 export const ConfigUpdate = z.object({llm: LlmSettings.optional(), bossReadOnlyConsent: z.boolean().optional()}).strict();
 export type AppConfig = {version: number; llm: z.infer<typeof LlmSettings> | null; llmEnvPath: string|null; bossReadOnlyConsent: boolean};
+export const NotificationPreferences=z.object({enabled:z.boolean(),queueReview:z.boolean().default(true),chatReview:z.boolean().default(true),taskAttention:z.boolean().default(true)}).strict();
+export const NotificationSave=NotificationPreferences.extend({webhookUrl:z.string().trim().max(2048).optional(),clearWebhook:z.boolean().default(false)}).strict();
+export type NotificationSettings=z.infer<typeof NotificationPreferences>;
+export type NotificationStatus={settings:NotificationSettings;configured:boolean;error:string|null;pending:{queue:number;chats:number;verification:number;tasks:number};lastAttemptAt:string|null;lastDeliveredAt:string|null;lastError:string|null;retryAt:string|null;busy:boolean};
 export const FactCategory = z.enum(['skill', 'experience', 'project', 'education', 'other']);
 export type FactCategoryName = z.infer<typeof FactCategory>;
 export type FactSource = {file: string; kind: 'docx' | 'pdf' | 'text'; page?: number; paragraph: number; quote: string};

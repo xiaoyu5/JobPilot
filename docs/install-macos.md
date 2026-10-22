@@ -1,15 +1,15 @@
 # JobPilot macOS 安装说明
 
-当前版本：0.4.2 预发行版，支持 macOS 13 及以上的 Apple Silicon Mac（M 系列）。Intel Mac 暂不支持。App 自带 Node，无需安装 Node、Rust 或单独运行服务器；BOSS 功能需要自行安装 Google Chrome。
+当前版本：0.4.3 预发行版，支持 macOS 13 及以上的 Apple Silicon Mac（M 系列）。Intel Mac 暂不支持。App 自带 Node，无需安装 Node、Rust 或单独运行服务器；BOSS 功能需要自行安装 Google Chrome。
 
 ## 下载与安装
 
-从 <https://github.com/xiaoyu5/JobPilot/releases> 下载 `JobPilot_0.4.2_aarch64.dmg` 和 `SHA256SUMS.txt`。如需只读连接扩展，另下载 `JobPilot_BOSS_Reader_0.1.2.zip`。
+从 <https://github.com/xiaoyu5/JobPilot/releases> 下载 `JobPilot_0.4.3_aarch64.dmg` 和 `SHA256SUMS.txt`。如需只读连接扩展，另下载 `JobPilot_BOSS_Reader_0.1.2.zip`。
 
 可在下载目录核对 DMG 的 SHA-256：
 
 ```sh
-shasum -a 256 JobPilot_0.4.2_aarch64.dmg
+shasum -a 256 JobPilot_0.4.3_aarch64.dmg
 ```
 
 结果应与同一发行版 `SHA256SUMS.txt` 中对应文件的一行相同。打开 DMG，将 JobPilot 拖到“应用程序”目录，再从 Finder 启动。更新前退出旧版应用，替换 App 即可；用户数据位于 `~/Library/Application Support/io.jobpilot.desktop`，不在 App 内。
@@ -28,6 +28,14 @@ shasum -a 256 JobPilot_0.4.2_aarch64.dmg
 部分页面需要扩展提供当前渲染组件的招聘人标识。解压 `JobPilot_BOSS_Reader_0.1.2.zip`，保留解压目录；在 **JobPilot 专用 Chrome** 中打开 `chrome://extensions`，开启“开发者模式”，选择“加载已解压的扩展程序”，选中包含 `manifest.json` 的 `JobPilot-BOSS-Reader` 目录。
 
 回到 BOSS 的岗位或会话页，点击拼图菜单中的“JobPilot BOSS 只读连接”，再点击“连接当前页面（只读）”。刷新页面后需重新连接。扩展仅使用 `activeTab` 和 `scripting`，不读取 Cookie、不发消息；安装与连接由你手动完成。连接不代表授权发送。
+
+## 可选企业微信通知
+
+在企业微信内部群添加群机器人，复制 Webhook。在 JobPilot“设置 → 企业微信通知”填写并保存地址，先点击“发送测试通知”，确认手机收件后勾选“启用企业微信通知”并保存。Webhook 不回显，保存在当前本机 `.env`，与 LLM 配置相互保留；也可手动填写 `WECOM_WEBHOOK_URL`，兼容 `HOOK_URL`。
+
+待审核草稿、已读取会话需人工处理、发送结果待核验及任务异常会汇总提醒。相同事项按版本去重，测试与待办通知至少间隔一分钟。通知仅含数量和处理入口，群内回复不能批准发送。请在手机 BOSS 查看消息，回 Mac 审核草稿或确认发送。App 退出、Mac 休眠时不检查；它不监听整个 BOSS 收件箱。
+
+通知与 BOSS 发送权限相互独立。真实企业微信收件需使用自己的机器人测试，本机匿名回归不替代此项验收。恢复备份或更换地址后需重新保存并启用。
 
 ## 当前验收范围
 

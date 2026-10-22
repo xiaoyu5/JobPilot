@@ -125,6 +125,8 @@ export async function applyPendingDataOperation(root:string){
     for(const row of locks)restored.db.prepare('INSERT OR IGNORE INTO contact_locks VALUES(?,?,?,?,?,?,?)').run(row.id,row.kind,row.job_id,row.recruiter_id,row.inbound_id,row.name,row.company);
     const config=restored.config();restored.setSetting('config',{...config,llm:null,llmEnvPath:join(root,'.env'),bossReadOnlyConsent:false,version:config.version+1});
     const policy=restored.getSetting<Record<string,unknown>>('sendPolicy');if(policy)restored.setSetting('sendPolicy',{...policy,liveEnabled:false,confirmed:false,version:Number(policy.version??0)+1});
+    const notifications=restored.getSetting<Record<string,unknown>>('notificationSettings');if(notifications)restored.setSetting('notificationSettings',{...notifications,enabled:false});
+    restored.setSetting('notificationDestination',null);restored.setSetting('notificationDelivery',null);
     restored.db.exec('DELETE FROM send_plans; DELETE FROM chat_plans;');
     restored.setSetting('appliedDataOperation',operation.id);
   });}finally{restored.close();}

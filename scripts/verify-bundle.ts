@@ -74,6 +74,8 @@ try {
   }
   const chats=await call<any>('chat.list');assert.equal(chats.autoEnabled,false);assert.equal(chats.items.length,0);assert.equal((await callWorker(dir,'chat.auto.set',{enabled:true,conversationIds:['fixture'],confirmed:true})).error?.code,'GUI_AUTH_REQUIRED');assert.equal((await callWorker(dir,'chat.commit',{id:randomUUID(),confirmed:true})).error?.code,'GUI_AUTH_REQUIRED');
   const sending=await call<SendingStatus>('send.status');assert.equal(sending.policy.liveEnabled,false);assert.equal(sending.policy.confirmed,false);assert.equal(sending.needsVerify,0);
+  const notifications=await call<any>('notifications.status');assert.equal(notifications.settings.enabled,false);assert.equal(notifications.configured,false);
+  for(const action of ['notifications.save','notifications.test','notifications.check'] as const)assert.equal((await callWorker(dir,action,{})).error?.code,'GUI_AUTH_REQUIRED');
   assert.equal((await callWorker(dir,'send.auto.set',{enabled:true})).error?.code,'GUI_AUTH_REQUIRED');
   assert.equal((await callWorker(dir,'send.commit',{planId:randomUUID(),confirmed:true})).error?.code,'GUI_AUTH_REQUIRED');
   assert.equal((await callWorker(dir,'run.start',{profileId:'primary',mode:'auto'})).error?.code,'CONSENT_REQUIRED');
@@ -101,7 +103,7 @@ try {
   client = new Client({name: 'jobpilot-bundle-check', version: '0.0.1'});
   await client.connect(new StdioClientTransport({command: node, args: [script, '--mode', 'mcp', '--data-dir', dir], env: {PATH: '/usr/bin:/bin'}}));
   await client.ping();
-  assert.equal(client.getServerVersion()?.version,'0.4.2');
+  assert.equal(client.getServerVersion()?.version,'0.4.3');
   const tools=await client.listTools();assert.equal(tools.tools.length,10);assert(!tools.tools.some(tool=>/commit|authorize|reset|restore|export/.test(tool.name)));
   const result = await client.callTool({name: 'jobpilot.status', arguments: {}});
   assert.equal(JSON.parse((result.content[0] as {text: string}).text).data.pid, first.pid);

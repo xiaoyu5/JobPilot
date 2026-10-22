@@ -14,6 +14,7 @@ import {EnvironmentSave,readEnvironment,saveEnvironment} from './environment.js'
 import {ChattingService,type ChatTransport} from '../../core/src/chatting.js';
 import {SendingService,type SendTransport} from '../../core/src/sending.js';
 import {DataService} from './data.js';
+import {NotificationService} from './notifications.js';
 
 const Identifier = z.object({id: z.string().min(1).max(200)}).strict();
 const StartPreview = StartRun.extend({maxJobs: z.number().int().min(1).max(50).optional()}).strict();
@@ -24,6 +25,7 @@ export class Application {
   readonly sending:SendingService;
   readonly chatting:ChattingService;
   readonly data:DataService;
+  readonly notifications:NotificationService;
   private dataBusy=false;
   private credentials: {baseUrl: string; apiKey: string} | null = null;
   private environmentError: string|null = null;
@@ -32,13 +34,15 @@ export class Application {
   private llmBusy = false;
   private importing = false;
   private started = Date.now();
-  constructor(dataDir: string,options:{chatTransport?:ChatTransport;transport?:SendTransport;health?:(signal:AbortSignal)=>Promise<boolean>;clock?:()=>number}={}) {
+  constructor(dataDir: string,options:{chatTransport?:ChatTransport;transport?:SendTransport;health?:(signal:AbortSignal)=>Promise<boolean>;clock?:()=>number;notifications?:{fetch?:typeof fetch;intervalMs?:number;timeoutMs?:number}}={}) {
     this.store = new Store(dataDir); this.browser = new BrowserProbe(dataDir); this.matching = new MatchingService(this.store,()=>this.llmConfiguration());
     this.environmentPath=this.store.config().llmEnvPath??join(dataDir,'.env');
     if(this.store.config().llmEnvPath||existsSync(this.environmentPath))try{this.useEnvironment(readEnvironment(this.environmentPath));}catch(error){this.environmentError=error instanceof AppError?error.message:'环境配置读取失败，请在设置重新选择文件。';}
     this.sending=new SendingService(this.store,this.matching,options.transport??this.browser,options.health??(signal=>this.llm(async()=>{const result=await testConnection(this.llmConfiguration(),signal);this.store.setSetting('llmHealth',{healthy:result.healthy,checkedAt:new Date().toISOString()});return result.healthy;},true)),options.clock);
     this.chatting=new ChattingService(this.store,this.sending,options.chatTransport??this.browser,()=>this.llmConfiguration(),()=>!!this.active||this.llmBusy||!!this.sending.active||this.dataBusy,options.clock,options.health);
     this.data=new DataService(this.store,dataDir,()=>this.status(),options.clock);
+    this.notifications=new NotificationService(this.store,()=>this.environmentPath,()=>this.dataBusy||existsSync(join(dataDir,'data-operation.json')),()=>this.chatting.list().authorizedIds,{...options.notifications,clock:options.clock});
+    this.notifications.start();
   }
   private useEnvironment(value:ReturnType<typeof readEnvironment>,explicit=false) {
     const {apiKey,...settings}=value.configuration;
@@ -132,13 +136,17 @@ export class Application {
     this.active={id:run.id,controller,promise};return {runId:run.id};
   }
   async dispatch(action: Request['action'], payload: unknown, signal: AbortSignal,guiAuthorized=false): Promise<unknown> {
-    const readOnly=['status','config.get','dashboard.get','jobs.list','jobs.get','resume.list','search.get','run.list','run.get','queue.list','send.status','send.outbox','chat.list','chat.outbox','outcomes.list','stats.get','data.status'];
+    const readOnly=['status','config.get','dashboard.get','jobs.list','jobs.get','resume.list','search.get','run.list','run.get','queue.list','send.status','send.outbox','chat.list','chat.outbox','outcomes.list','stats.get','data.status','notifications.status'];
     if(this.dataBusy&&!readOnly.includes(action))throw new AppError('RUN_ACTIVE','本机数据操作正在进行，请稍后重试。');
     if(!readOnly.includes(action)&&action!=='data.operation.cancel'&&action!=='send.stop'&&await this.data.pending())throw new AppError('RESTART_REQUIRED','已确认的数据操作等待重启；可在设置取消。');
     if(this.dataBusy&&!readOnly.includes(action))throw new AppError('RUN_ACTIVE','本机数据操作正在进行，请稍后重试。');
     if(this.chatting.busy&&!readOnly.includes(action)&&!['send.stop','run.pause','chat.auto.set'].includes(action))throw new AppError('RUN_ACTIVE','聊天任务持有浏览器与模型，请先停止。');
     if(this.sending.active&&['chat.open','chat.scan','chat.prepare','chat.commit','chat.auto.tick','browser.open','browser.close','boss.login.open','boss.login.status','jobs.read','boss.communication.inspect','send.prepare','llm.env.load','llm.env.save'].includes(action))throw new AppError('RUN_ACTIVE','发送任务持有浏览器，请先暂停。');
     switch (action) {
+      case 'notifications.status': return this.notifications.status();
+      case 'notifications.save': return this.notifications.save(payload,guiAuthorized);
+      case 'notifications.test': return this.notifications.test(guiAuthorized);
+      case 'notifications.check': return this.notifications.check(true,guiAuthorized);
       case 'outcomes.list': return listOutcomes(this.store.db,OutcomeList.parse(payload??{}));
       case 'outcomes.update': return this.maintain(guiAuthorized,()=>{const input=OutcomeUpdate.parse(payload),value=this.store.transaction(()=>updateOutcome(this.store.db,input));if(input.rejected)this.chatting.stop();return value;});
       case 'stats.get': return conversionStats(this.store.db,StatsQuery.parse(payload??{}));
@@ -264,6 +272,7 @@ export class Application {
     this.active?.controller.abort();
     this.sending.pause();
     this.chatting.stop();
+    await this.notifications.close();
     await this.browser.dispose();
   }
   async close() {

@@ -28,21 +28,28 @@ function encode(value:string){
   return quote+value+quote;
 }
 export function readEnvironment(path:string){const resolved=envPath(path),text=readText(resolved);return {path:realpathSync(resolved),configuration:configuration(text)};}
-export function saveEnvironment(path:string,input:z.infer<typeof EnvironmentSave>){
-  const target=envPath(path);let text=readText(target,true);let values:NodeJS.Dict<string>;
-  try{values=parseEnv(text);}catch{throw new AppError('ENV_INVALID','现有配置格式无效，请先修正配置文件。');}
-  const apiKey=input.clearKey?'':input.apiKey||values.OPENAI_API_KEY||'';
-  const config=validateEndpoint({baseUrl:input.baseUrl,model:input.model,apiKey,timeoutMs:input.timeoutMs,allowLan:input.allowLan});
-  const updates:Record<string,string>={OPENAI_BASE_URL:config.baseUrl,OPENAI_MODEL:config.model,OPENAI_API_KEY:apiKey,OPENAI_TIMEOUT_MS:String(config.timeoutMs),OPENAI_ALLOW_LAN:String(config.allowLan)};
+export function readEnvironmentValues(path:string,allowMissing=false){
+  try{return parseEnv(readText(envPath(path),allowMissing));}catch(error){if(error instanceof AppError)throw error;throw new AppError('ENV_INVALID','环境配置格式无效，请先修正配置文件。');}
+}
+export function saveEnvironmentValues(path:string,updates:Record<string,string>){
+  const target=envPath(path);let text=readText(target,true);let original:NodeJS.Dict<string>;
+  try{original=parseEnv(text);}catch{throw new AppError('ENV_INVALID','现有配置格式无效，请先修正配置文件。');}
   const remaining=new Set(Object.keys(updates));
   text=text.split(/\r?\n/).map(line=>{const match=line.match(/^\s*(?:export\s+)?([A-Za-z_][\w]*)\s*=/);if(!match||!(match[1]in updates))return line;if(!remaining.delete(match[1]))return '';return `${match[1]}=${encode(updates[match[1]])}`;}).join('\n').replace(/\n*$/,'\n');
   for(const key of remaining)text+=`${key}=${encode(updates[key])}\n`;
-  // Validate the exact bytes before replacing. Preserve unrelated variables and comments.
-  const decoded=configuration(text);
-  if(JSON.stringify(decoded)!==JSON.stringify(config))throw new AppError('ENV_ENCODING_ERROR','配置文件无法完整保存这些值，原文件未修改。');
+  let decoded:NodeJS.Dict<string>;try{decoded=parseEnv(text);}catch{throw new AppError('ENV_ENCODING_ERROR','配置无法完整保存，原文件未修改。');}
+  if(Object.entries({...original,...updates}).some(([key,value])=>decoded[key]!==value)||Object.keys(decoded).some(key=>!(key in original)&&!(key in updates)))throw new AppError('ENV_ENCODING_ERROR','配置无法完整保存，原文件未修改。');
   let actual=target;try{actual=realpathSync(target);}catch{}
   const temp=join(dirname(actual),`.jobpilot-env-${randomUUID()}.tmp`);
   try{writeFileSync(temp,text,{mode:0o600,flag:'wx'});const fd=openSync(temp,'r');try{fsyncSync(fd);}finally{closeSync(fd);}renameSync(temp,actual);}
   catch{try{unlinkSync(temp);}catch{}throw new AppError('ENV_WRITE_FAILED','无法保存环境配置，请检查目录权限。');}
+  return actual;
+}
+export function saveEnvironment(path:string,input:z.infer<typeof EnvironmentSave>){
+  const values=readEnvironmentValues(path,true);
+  const apiKey=input.clearKey?'':input.apiKey||values.OPENAI_API_KEY||'';
+  const config=validateEndpoint({baseUrl:input.baseUrl,model:input.model,apiKey,timeoutMs:input.timeoutMs,allowLan:input.allowLan});
+  const updates:Record<string,string>={OPENAI_BASE_URL:config.baseUrl,OPENAI_MODEL:config.model,OPENAI_API_KEY:apiKey,OPENAI_TIMEOUT_MS:String(config.timeoutMs),OPENAI_ALLOW_LAN:String(config.allowLan)};
+  const actual=saveEnvironmentValues(path,updates);
   return {path:actual,configuration:config};
 }
