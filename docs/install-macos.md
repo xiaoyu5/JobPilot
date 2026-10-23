@@ -1,15 +1,15 @@
 # JobPilot macOS 安装说明
 
-当前版本：0.5.2 预发行版，支持 macOS 13 及以上的 Apple Silicon Mac（M 系列）。Intel Mac 暂不支持。App 自带 Node，无需安装 Node、Rust 或单独运行服务器；BOSS 功能需要自行安装 Google Chrome。
+当前版本：0.5.3 预发行版，支持 macOS 13 及以上的 Apple Silicon Mac（M 系列）。Intel Mac 暂不支持。App 自带 Node，无需安装 Node、Rust 或单独运行服务器；BOSS 功能需要自行安装 Google Chrome。
 
 ## 下载与安装
 
-从 <https://github.com/xiaoyu5/JobPilot/releases> 下载 `JobPilot_0.5.2_aarch64.dmg` 和 `SHA256SUMS.txt`。如需只读连接扩展，另下载 `JobPilot_BOSS_Reader_0.3.0.zip`。
+从 <https://github.com/xiaoyu5/JobPilot/releases> 下载 `JobPilot_0.5.3_aarch64.dmg` 和 `SHA256SUMS.txt`。如需只读连接扩展，另下载 `JobPilot_BOSS_Reader_0.3.0.zip`。
 
 可在下载目录核对 DMG 的 SHA-256：
 
 ```sh
-shasum -a 256 JobPilot_0.5.2_aarch64.dmg
+shasum -a 256 JobPilot_0.5.3_aarch64.dmg
 ```
 
 结果应与同一发行版 `SHA256SUMS.txt` 中对应文件的一行相同。打开 DMG，将 JobPilot 拖到“应用程序”目录，再从 Finder 启动。更新前退出旧版应用，替换 App 即可；用户数据位于 `~/Library/Application Support/io.jobpilot.desktop`，不在 App 内。
@@ -53,4 +53,4 @@ shasum -a 256 JobPilot_0.5.2_aarch64.dmg
 
 “数据与诊断”可导出脱敏诊断 JSON、创建私密备份和恢复。分享问题时优先提供脱敏诊断；不要上传 `.env`、SQLite 备份、Chrome Profile、原始简历或聊天截图中的个人信息。私密备份含个人数据，应由自己保管。
 
-本机安装、重启及捆绑运行时检查已通过；独立干净 Mac / 新用户环境和从 GitHub 实际下载后的首次安装仍待实测。
+0.5.3 修复了首次安装或清空数据后无法启动的问题。本机清空 App、应用数据、缓存后重装，空数据启动、仅恢复设置、重启及原业务恢复已通过，见[验证记录](m5.3-validation.md)。这次沿用当前 macOS 用户的系统权限历史；独立干净 Mac / 新用户环境及首次 Gatekeeper、系统权限提示仍待实测。

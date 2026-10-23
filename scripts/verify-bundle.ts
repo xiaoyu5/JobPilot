@@ -16,7 +16,9 @@ import type {Assessment,Draft} from '@jobpilot/contracts';
 const {productName,version}=JSON.parse(await readFile('apps/desktop/src-tauri/tauri.conf.json','utf8'));
 const bundle = await realpath(resolve(process.argv[2] ?? `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/${productName}.app`));
 await withModel(goodResponse,async config=>{
-const dir = await mkdtemp('/tmp/jp-bundle-');
+const sandbox = await mkdtemp('/tmp/jp-bundle-');
+const dir = resolve(sandbox, 'fresh-data');
+assert.equal(await stat(dir).then(() => true, () => false), false, 'first launch must create the data directory itself');
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 let desktop: ChildProcess | undefined;
 let client: Client | undefined;
@@ -58,6 +60,8 @@ try {
   desktop = launch();
   desktop.stderr?.on('data', data => process.stderr.write(data));
   const first = await ready();
+  assert.equal((await stat(dir)).mode & 0o777, 0o700);
+  console.log('PASS: first launch creates the previously absent private data directory');
   assert.equal(first.arch, 'arm64'); assert.equal(first.node, '22.23.2');
   assert.equal(first.milestone,'M4');assert.equal(first.autoModeConsent,false);assert.equal(first.mode,'preview');
   const actions=await stat(`${bundle}/Contents/Resources/worker/browser-actions.js`);assert(actions.size>0&&actions.size<256*1024);
@@ -146,7 +150,7 @@ try {
   await client?.close(); desktop?.kill('SIGTERM');
   await callWorker(dir, 'shutdown', undefined, 3000).catch(() => {});
   await wait(1500);
-  await rm(dir, {recursive: true, force: true});
+  await rm(sandbox, {recursive: true, force: true});
 }
 
 });

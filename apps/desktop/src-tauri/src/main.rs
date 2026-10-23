@@ -93,6 +93,16 @@ impl Supervisor {
                     .app_data_dir()
                     .map_err(|_| "无法定位本地数据目录".to_string())?,
             );
+        // A first installation has no data directory yet. Command::current_dir
+        // is applied before Node can create it in startWorker.
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|_| "无法创建本地数据目录，请检查目录访问权限。".to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&data_dir, std::fs::Permissions::from_mode(0o700))
+                .map_err(|_| "无法设置本地数据目录权限。".to_string())?;
+        }
         let (node, script) = if cfg!(debug_assertions) {
             let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
             (

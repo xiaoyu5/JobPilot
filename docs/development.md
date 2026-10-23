@@ -23,9 +23,9 @@ npm run verify:bundle
 npm run verify:installer
 ```
 
-产物在 `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/`。构建后执行 `npm run release:prepare`，检查 DMG、包内版本与签名结构、捆绑 Node 和扩展权限，将 DMG、只读扩展 ZIP、安装说明及校验清单汇集至 `.local/releases/0.4.4/`。此命令不启动 App、不连接 BOSS，也不上传文件；已存在的发行目录不会覆盖。源码与发行准备说明见 [GitHub 发布](github-release.md)。
+产物在 `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/`。构建后执行 `npm run release:prepare`，检查 DMG、包内版本与签名结构、捆绑 Node 和扩展权限，将 DMG、只读扩展 ZIP、安装说明及校验清单汇集至 `.local/releases/<版本号>/`。此命令不启动 App、不连接 BOSS，也不上传文件；已存在的发行目录不会覆盖。源码与发行准备说明见 [GitHub 发布](github-release.md)。
 
-`verify:installer` 校验并以只读方式挂载 DMG，将 App 复制到临时目录，再运行发布包检查；不会写入 `/Applications`。这不替代干净用户环境和 Gatekeeper 验收。
+`verify:installer` 校验并以只读方式挂载 DMG，将 App 复制到临时目录，再运行发布包检查；不会写入 `/Applications`。回归从不存在的数据目录启动，验证桌面进程创建 0700 私有目录，不再预建该目录。这不替代干净用户环境和 Gatekeeper 验收。
 
 ## 测试与验证
 
