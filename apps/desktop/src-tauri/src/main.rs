@@ -218,7 +218,7 @@ async fn worker_request(
         "queue.remove", "dryrun.start", "llm.env.load", "llm.env.save",
         "notifications.status", "notifications.save", "notifications.test", "notifications.check",
         "send.status", "send.policy.save", "send.auto.set", "send.prepare", "send.commit", "send.followup.prepare", "send.followup.commit",
-        "send.stop", "send.reset", "send.resume", "send.cancel", "send.checkpoint", "send.outbox", "send.verify", "send.resolve", "boss.communication.inspect", "chat.open", "chat.scan", "chat.inbox.scan", "chat.list", "chat.prepare", "chat.commit", "chat.auto.set", "chat.watch.set", "chat.auto.tick", "chat.outbox", "chat.resolve",
+        "send.stop", "send.reset", "send.resume", "send.cancel", "send.checkpoint", "send.outbox", "send.verify", "send.resolve", "boss.communication.inspect", "chat.open", "chat.scan", "chat.inbox.scan", "chat.list", "chat.prepare", "chat.ack.prepare", "chat.commit", "chat.auto.set", "chat.watch.set", "chat.auto.tick", "chat.outbox", "chat.resolve",
         "outcomes.list","outcomes.update","stats.get","diagnostics.export","data.status","data.backup","data.restore.prepare","data.restore.commit","data.reset","data.cleanup.preview","data.cleanup.commit","data.retention.save","data.operation.cancel",
     ]
     .contains(&action.as_str())
@@ -227,7 +227,7 @@ async fn worker_request(
     }
     let (data_dir,gui_token)={let supervisor=state.lock().map_err(|_| "Supervisor 状态不可用")?;(supervisor.data_dir.clone(),supervisor.gui_token.clone())};
     tauri::async_runtime::spawn_blocking(move || {
-        let protected=["queue.review","workflow.schedule.save","send.policy.save","send.auto.set","send.commit","send.followup.commit","send.reset","send.resume","send.cancel","send.resolve","chat.commit","chat.auto.set", "chat.watch.set","chat.resolve","outcomes.update","diagnostics.export","data.backup","data.restore.prepare","data.restore.commit","data.reset","data.cleanup.preview","data.cleanup.commit","data.retention.save","data.operation.cancel","notifications.save","notifications.test","notifications.check"].contains(&action.as_str());
+        let protected=["chat.ack.prepare","queue.review","workflow.schedule.save","send.policy.save","send.auto.set","send.commit","send.followup.commit","send.reset","send.resume","send.cancel","send.resolve","chat.commit","chat.auto.set", "chat.watch.set","chat.resolve","outcomes.update","diagnostics.export","data.backup","data.restore.prepare","data.restore.commit","data.reset","data.cleanup.preview","data.cleanup.commit","data.retention.save","data.operation.cancel","notifications.save","notifications.test","notifications.check"].contains(&action.as_str());
         rpc_with_gui(&data_dir, &action, payload.unwrap_or(Value::Null), Duration::from_secs(190),if protected {Some(&gui_token)} else {None})
     })
     .await

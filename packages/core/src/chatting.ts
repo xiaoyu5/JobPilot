@@ -2,8 +2,9 @@ import {createHash,randomUUID} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {z} from 'zod';
 import {completeJson,testConnection} from '@jobpilot/llm';
-import {AppError,redact,type ConversationSnapshot,type ChatConversation,type ChatReplyPlan,type ChatState,type LlmConfiguration,type SendVerification} from '@jobpilot/contracts';
+import {AppError,redact,type ConversationSnapshot,type ChatConversation,type ChatReplyPlan,type ChatAcknowledgement,type ChatState,type LlmConfiguration,type SendVerification} from '@jobpilot/contracts';
 import {explicitRefusal,needsHumanReply,isReplyQuestion} from '../../contracts/src/chat-rules.js';
+import {acknowledgementText,resumeRequest} from './chat-acknowledgements.js';
 import {Store} from '@jobpilot/store';
 import {SendingService} from './sending.js';
 import {recruiterHistory} from './recruiter-identity.js';
@@ -24,7 +25,7 @@ export function classifyConversation(chat:ConversationSnapshot):{state:ChatState
   if(!last||last.direction==='outgoing')return {state:'WAITING',reason:'等待对方回复，不自动追问或重复招呼。',inboundId:null};
   if(!last.id||!last.confirmed||!chat.historyComplete)return {state:'REVIEW',reason:'历史未完整加载或最新消息标识不可靠，先人工核对。',inboundId:last.id||null};
   const pending=messages.slice(messages.findLastIndex(message=>message.direction==='outgoing')+1);
-  if(pending.filter(message=>isReplyQuestion(message.text)).length>1)return {state:'REVIEW',reason:'对方连续提出多个尚未回答的问题，需人工核对完整语境。',inboundId:last.id};
+  if(pending.filter(message=>isReplyQuestion(message.text)&&!/^(您好|你好|hello|hi)[!！。，,\s]*$/i.test(message.text.trim())).length>1)return {state:'REVIEW',reason:'对方连续提出多个尚未回答的问题，需人工核对完整语境。',inboundId:last.id};
   if(pending.some(message=>needsHumanReply(message.text)))return {state:'REVIEW',reason:'涉及薪资、时间、联系方式、附件或其它需人工决定的内容。',inboundId:last.id};
   if(!isReplyQuestion(last.text))return /^(收到|好的|好|谢谢|嗯|ok)[!！。\s]*$/i.test(last.text.trim())?{state:'WAITING',reason:'最新消息无需自动回复。',inboundId:last.id}:{state:'REVIEW',reason:'最新消息意图不明确，不将其当作自动回复邀请。',inboundId:last.id};
   return {state:'REPLY_NEEDED',reason:'有新的对方提问，可依据已确认事实准备回复。',inboundId:last.id};
@@ -40,7 +41,7 @@ export class ChattingService{
   private readConsent(){if(!this.store.config().bossReadOnlyConsent)throw new AppError('CONSENT_REQUIRED','请先授权专用 BOSS 会话访问。');}
   private async exclusive<T>(fn:(signal:AbortSignal)=>Promise<T>){if(this.working||this.externalBusy())throw new AppError('RUN_ACTIVE','已有任务持有浏览器或模型。');this.working=true;this.controller=new AbortController();this.beat=this.clock();const watchdog=setInterval(()=>{const gap=this.clock()-this.beat;if(gap>30000||gap<0)this.controller?.abort(new AppError('SYSTEM_RESUMED','检测到休眠或时钟跳变，停止聊天发送。'));this.beat=this.clock();},1000);watchdog.unref();const task=fn(this.controller.signal);this.task=task;try{return await task;}finally{clearInterval(watchdog);this.working=false;this.controller=undefined;this.task=undefined;}}
   private guard(signal:AbortSignal){signal.throwIfAborted();const gap=this.clock()-this.beat;if(gap>30000||gap<0)throw new AppError('SYSTEM_RESUMED','检测到休眠或时钟跳变，停止发送。');}
-  private view(row:Row):ChatConversation{return {id:row.id,recruiterId:row.recruiter_id,name:row.name,company:row.company,state:row.state,reason:row.reason,version:row.version,lastInboundId:row.last_inbound_id,updatedAt:row.updated_at};}
+  private view(row:Row):ChatConversation{const request=row.state==='REVIEW'?resumeRequest(JSON.parse(row.snapshot_json)):null;return {...(request?{resumeRequest:request.text.slice(0,1500)}:{}),id:row.id,recruiterId:row.recruiter_id,name:row.name,company:row.company,state:row.state,reason:row.reason,version:row.version,lastInboundId:row.last_inbound_id,updatedAt:row.updated_at};}
   private row(id:string){const row=this.store.db.prepare('SELECT * FROM chat_conversations WHERE id=?').get(id) as Row|undefined;if(!row)throw new AppError('CHAT_NOT_FOUND','请先读取当前已有会话。');return row;}
   private snapshot(id:string):ConversationSnapshot{return JSON.parse(this.row(id).snapshot_json);}
   list(){if(this.authorization?.context!==this.context())this.disable();return {watchEnabled:!!this.watchTimer,watchError:this.watchError,items:(this.store.db.prepare('SELECT * FROM chat_conversations ORDER BY updated_at DESC LIMIT 100').all() as Row[]).map(row=>this.view(row)),lastError:this.store.getSetting('chatLastError'),autoEnabled:!!this.authorization,authorizedIds:this.authorization?.ids??[],busy:this.busy};}
@@ -92,19 +93,34 @@ export class ChattingService{
     this.store.db.prepare('INSERT INTO chat_plans VALUES(?,?,?,?,?,0)').run(plan.id,id,JSON.stringify(plan),this.stamp(chat),plan.expiresAt);return plan;
   }
   prepare(id:string){return this.exclusive(signal=>this.prepareInternal(id,signal));}
+  prepareAcknowledgement(id:string,choice:ChatAcknowledgement,gui:boolean){
+    this.gui(gui);this.readConsent();
+    if(!Object.hasOwn(acknowledgementText,choice))throw new AppError('INVALID_REPLY','请选择一个明确的处理决定。');
+    return this.exclusive(async signal=>{
+      const target=this.snapshot(id),fresh=await this.transport.readConversation(signal,target);
+      if(fresh.id!==target.id||fresh.recruiterId!==target.recruiterId)throw new AppError('TARGET_MISMATCH','当前不是所选会话。');
+      const view=this.ingest(fresh),chat=this.snapshot(id),request=resumeRequest(chat);
+      if(view.state==='REJECTED')throw new AppError('CONVERSATION_REJECTED','该招聘人已拒绝，停止联系。');
+      if(view.state!=='REVIEW'||!request||request.id!==view.lastInboundId)throw new AppError('CHAT_NOT_REPLYABLE','当前没有可人工决定的附件简历请求。');
+      const blocks:ChatReplyPlan['blocks']=[];try{this.sending.checkGate();}catch(error){blocks.push({code:error instanceof AppError?error.code:'POLICY_BLOCKED',message:error instanceof AppError?error.message:'发送未启用。'});}
+      const plan:ChatReplyPlan={id:randomUUID(),conversationId:id,inboundId:request.id,content:acknowledgementText[choice],factIds:[],resumeVersion:this.store.frozenFacts().version,expiresAt:new Date(this.clock()+300000).toISOString(),blocks,acknowledgement:choice,question:request.text.slice(0,1500)};
+      this.guard(signal);this.store.db.prepare('INSERT INTO chat_plans VALUES(?,?,?,?,?,0)').run(plan.id,id,JSON.stringify(plan),this.stamp(chat),plan.expiresAt);return plan;
+    });
+  }
   private async commitInternal(planId:string,signal:AbortSignal,mode:'review'|'auto',runId?:string){
     const row=this.store.db.prepare('SELECT * FROM chat_plans WHERE id=?').get(planId) as Row|undefined;
     if(!row||row.used||Date.parse(row.expires_at)<=this.clock())throw new AppError('CONFIRMATION_EXPIRED','回复确认已失效。');
-    const plan=JSON.parse(row.detail_json) as ChatReplyPlan;if(plan.blocks.length)throw new AppError(plan.blocks[0].code,plan.blocks[0].message);
+    const plan=JSON.parse(row.detail_json) as ChatReplyPlan;if(plan.acknowledgement&&(mode!=='review'||plan.content!==acknowledgementText[plan.acknowledgement]||plan.factIds.length))throw new AppError('CONSENT_REQUIRED','附件请求的文字确认只能由 GUI 人工选择，不能自动回复。');if(plan.blocks.length)throw new AppError(plan.blocks[0].code,plan.blocks[0].message);
     this.sending.checkGate();const target=this.snapshot(plan.conversationId),fresh=await this.transport.readConversation(signal,target);if(fresh.id!==target.id||fresh.recruiterId!==target.recruiterId)throw new AppError('TARGET_MISMATCH','当前不是所选会话。');this.ingest(fresh);
-    if(this.row(target.id).state!=='REPLY_NEEDED'||this.stamp(this.snapshot(target.id))!==row.context_hash)throw new AppError('CONVERSATION_CHANGED','会话或最新消息已变化，原回复失效。');
+    const ready=plan.acknowledgement?this.row(target.id).state==='REVIEW'&&resumeRequest(this.snapshot(target.id))?.id===plan.inboundId:this.row(target.id).state==='REPLY_NEEDED';
+    if(!ready||this.stamp(this.snapshot(target.id))!==row.context_hash)throw new AppError('CONVERSATION_CHANGED','会话或最新消息已变化，原回复失效。');
     this.store.frozenFacts(plan.resumeVersion);if(!await this.health(signal))throw new AppError('LLM_UNAVAILABLE','模型服务不可用，停止回复并保留草稿。');this.guard(signal);
     if(!runId&&this.sending.budget().runsToday>=this.sending.policy().maxRunsPerDay)throw new AppError('DAILY_RUN_LIMIT','今日轮次已用完。');
     const last=this.sending.budget().lastActionAt;
     while(last!==null&&this.clock()-last<this.sending.policy().minIntervalSeconds*1000){await delay(Math.min(1000,this.sending.policy().minIntervalSeconds*1000-(this.clock()-last)),undefined,{signal});this.sending.checkGate();}
     this.guard(signal);this.sending.checkGate();if(mode==='auto'&&!this.isAuthorized(target.id))throw new AppError('CONSENT_REQUIRED','自动回复授权已失效。');
     const run=runId?this.store.getRun(runId)!:this.store.createRun('boss'),intentId=randomUUID();
-    this.store.transaction(()=>{this.store.db.prepare("UPDATE runs SET kind='chat',execution_mode=?,state='SENDING' WHERE id=?").run(mode,run.id);this.store.db.prepare('INSERT INTO chat_outbox(id,run_id,conversation_id,recruiter_id,inbound_id,content,context_hash,state,created_at) VALUES(?,?,?,?,?,?,?,\'SENDING\',?)').run(intentId,run.id,target.id,target.recruiterId,plan.inboundId,plan.content,row.context_hash,this.now());this.store.db.prepare('UPDATE chat_plans SET used=1 WHERE id=?').run(planId);this.store.event(run.id,'CHAT_SEND_INTENT',`回复意图已持久化，绑定具体会话与对方消息；规则 v${this.sending.policy().version}，事实 v${plan.resumeVersion}，授权模式 ${mode}。`);});
+    this.store.transaction(()=>{this.store.db.prepare("UPDATE runs SET kind='chat',execution_mode=?,state='SENDING' WHERE id=?").run(mode,run.id);this.store.db.prepare('INSERT INTO chat_outbox(id,run_id,conversation_id,recruiter_id,inbound_id,content,context_hash,state,created_at) VALUES(?,?,?,?,?,?,?,\'SENDING\',?)').run(intentId,run.id,target.id,target.recruiterId,plan.inboundId,plan.content,row.context_hash,this.now());this.store.db.prepare('UPDATE chat_plans SET used=1 WHERE id=?').run(planId);this.store.event(run.id,'CHAT_SEND_INTENT',`${plan.acknowledgement?'人工附件请求文字确认，仅发送文本；':'事实回复；'}回复意图已持久化，绑定具体会话与对方消息；规则 v${this.sending.policy().version}，事实 v${plan.resumeVersion}，授权模式 ${mode}。`);});
     let dispatched=false;
     try{
       await this.transport.prepareReply(target,plan.content,plan.inboundId,signal,intentId);this.guard(signal);this.sending.checkGate(1,true);

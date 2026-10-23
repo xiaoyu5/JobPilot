@@ -73,6 +73,7 @@ try {
     assert(result.ok, JSON.stringify(result.error)); return result.data as T;
   }
   const chats=await call<any>('chat.list');assert.equal(chats.autoEnabled,false);assert.equal(chats.items.length,0);assert.equal((await callWorker(dir,'chat.auto.set',{enabled:true,conversationIds:['fixture'],confirmed:true})).error?.code,'GUI_AUTH_REQUIRED');assert.equal((await callWorker(dir,'chat.commit',{id:randomUUID(),confirmed:true})).error?.code,'GUI_AUTH_REQUIRED');
+  assert.equal((await callWorker(dir,'chat.ack.prepare',{id:'boss-chat:fixture',choice:'resume-consent'})).error?.code,'GUI_AUTH_REQUIRED');
   const sending=await call<SendingStatus>('send.status');assert.equal(sending.policy.liveEnabled,false);assert.equal(sending.policy.confirmed,false);assert.equal(sending.needsVerify,0);
   const notifications=await call<any>('notifications.status');assert.equal(notifications.settings.enabled,false);assert.equal(notifications.configured,false);
   for(const action of ['notifications.save','notifications.test','notifications.check'] as const)assert.equal((await callWorker(dir,action,{})).error?.code,'GUI_AUTH_REQUIRED');

@@ -1,6 +1,6 @@
 {
   "name": "jobpilot",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -39,7 +39,8 @@
     "verify:bundle:m4": "node --import tsx scripts/m4-bundle-smoke.ts",
     "release:prepare": "node scripts/prepare-release.mjs",
     "verify:ui:followup": "node --import tsx scripts/followup-ui-smoke.ts",
-    "verify:ui:closeout": "node --import tsx scripts/closeout-ui-smoke.ts"
+    "verify:ui:closeout": "node --import tsx scripts/closeout-ui-smoke.ts",
+    "verify:ui:chat-ack": "node --import tsx scripts/chat-ack-ui-smoke.ts"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.3.1",

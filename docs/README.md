@@ -35,8 +35,9 @@
 | 0.4.1 | JD 稳定性与失效草稿恢复 | [记录](m4.1-validation.md) |
 | 0.4.2 | 应用交付能力匹配与手动事实 | [记录](m4.2-validation.md) |
 | 0.4.3 | 企业微信单向待办通知 | [记录](m4.3-validation.md) |
-| 0.5.0 | 会话监测、自然文案、连续任务与排程、多方案采集 | [记录](m5-validation.md) |
 | 0.4.4 | 新版简历、岗位字符、真实首次沟通与单条 AI 恢复 | [记录](m4.4-validation.md) |
+| 0.5.0 | 会话监测、自然文案、连续任务与排程、多方案采集 | [记录](m5-validation.md) |
+| 0.5.1 | 附件请求的人工文字回复 | [记录](m5.1-validation.md) |
 
 0.4.4 已完成一次真实首次沟通验证：职位详情点击“立即沟通”发送平台默认招呼，适配修复后，经用户独立确认仅继续原 AI 文案，两个页面回执、原意图和额度均核对通过。“继续沟通”进入聊天消息页；已有会话回复与 Auto 的真实发送不在这次验收范围内。
 
@@ -61,7 +62,7 @@
 | [0013](adr/0013-wecom-review-notifications.md) | 企业微信通知 |
 | [0014](adr/0014-resume-refresh-and-job-text.md) | 简历刷新与岗位数字字体 |
 | [0015](adr/0015-start-chat-receipts-and-ai-followup.md) | 真实弹窗回执和未提交 AI 的独立续发 |
+| [0016](adr/0016-workflow-and-conversation-completion.md) | 连续任务与会话功能收尾 |
+| [0017](adr/0017-human-resume-request-replies.md) | 附件请求的人工文字处理 |
 
 早期 ADR 反映当时的决策；后续变更和实际结果以较新 ADR、版本验证记录为准。原始需求含个人简历背景，仅保留在本机，不随公开仓库提供。
-
-当前收尾决策：[ADR-0016](adr/0016-workflow-and-conversation-completion.md)。

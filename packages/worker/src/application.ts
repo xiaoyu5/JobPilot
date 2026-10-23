@@ -1,6 +1,6 @@
 import {WorkflowService,WorkflowInput,ScheduleInput,type WorkflowBrowser} from '../../core/src/workflow.js';
 import { z } from 'zod';
-import {FactAdd} from '@jobpilot/contracts';
+import {ChatAcknowledgementInput,FactAdd} from '@jobpilot/contracts';
 import { AppError, AnalyzeInput, ConfigUpdate, DraftInput, DraftUpdate, DryRunInput, FactUpdate, JobListQuery, QueueInput, QueueList, QueueReview, ResumeImport, SearchProfile, StartRun,SendSelection,SendCommit,SendResolve, type Request, type JobSource, type JobRecord, type WorkerStatus, type LlmConfiguration } from '@jobpilot/contracts';
 import { Store,listOutcomes,updateOutcome,conversionStats } from '@jobpilot/store';
 import {OutcomeList,OutcomeUpdate,StatsQuery} from '@jobpilot/contracts';
@@ -149,7 +149,7 @@ export class Application {
     if(!readOnly.includes(action)&&action!=='data.operation.cancel'&&action!=='send.stop'&&await this.data.pending())throw new AppError('RESTART_REQUIRED','已确认的数据操作等待重启；可在设置取消。');
     if(this.dataBusy&&!readOnly.includes(action))throw new AppError('RUN_ACTIVE','本机数据操作正在进行，请稍后重试。');
     if(this.chatting.busy&&!readOnly.includes(action)&&!['send.stop','run.pause','chat.auto.set'].includes(action))throw new AppError('RUN_ACTIVE','聊天任务持有浏览器与模型，请先停止。');
-    if(this.sending.active&&['chat.open','chat.scan','chat.inbox.scan','chat.prepare','chat.commit','chat.auto.tick','browser.open','browser.close','boss.login.open','boss.login.status','jobs.read','boss.communication.inspect','send.prepare','llm.env.load','llm.env.save'].includes(action))throw new AppError('RUN_ACTIVE','发送任务持有浏览器，请先暂停。');
+    if(this.sending.active&&['chat.open','chat.scan','chat.inbox.scan','chat.prepare','chat.ack.prepare','chat.commit','chat.auto.tick','browser.open','browser.close','boss.login.open','boss.login.status','jobs.read','boss.communication.inspect','send.prepare','llm.env.load','llm.env.save'].includes(action))throw new AppError('RUN_ACTIVE','发送任务持有浏览器，请先暂停。');
     switch (action) {
       case 'notifications.status': return this.notifications.status();
       case 'notifications.save': return this.notifications.save(payload,guiAuthorized);
@@ -176,6 +176,7 @@ export class Application {
       case 'chat.watch.set': return this.chatting.setWatch(z.object({enabled:z.boolean()}).strict().parse(payload).enabled,guiAuthorized);
       case 'chat.list': return this.chatting.list();
       case 'chat.scan': this.consent();return this.chatting.scan(payload===undefined?undefined:Identifier.parse(payload).id);
+      case 'chat.ack.prepare': {const input=ChatAcknowledgementInput.parse(payload);return this.chatting.prepareAcknowledgement(input.id,input.choice,guiAuthorized);}
       case 'chat.prepare': return this.chatting.prepare(Identifier.parse(payload).id);
       case 'chat.commit': return this.chatting.commit(z.object({id:z.string().uuid(),confirmed:z.literal(true)}).strict().parse(payload).id,guiAuthorized);
       case 'chat.auto.set': {const input=z.object({enabled:z.boolean(),conversationIds:z.array(z.string().min(1).max(200)).max(20).default([]),confirmed:z.literal(true)}).strict().parse(payload);return this.chatting.setAuto(input.enabled,input.conversationIds,guiAuthorized);}
