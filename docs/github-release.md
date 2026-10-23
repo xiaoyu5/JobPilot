@@ -31,4 +31,4 @@ npm run release:prepare
 
 只上传 `.local/releases/0.4.4/` 中的固定发行文件，不上传 `.local/` 其余内容。源码作为常规 Git 提交推送，DMG 和扩展 ZIP 作为 Release 附件。项目自身的开源许可证尚未选择；不自动替作者授予 MIT 等许可，第三方组件仍受各自许可证约束。
 
-真实发送尚未验收，创建 GitHub **预发行版**时使用 `docs/releases/0.4.4.md` 的说明，不能标记为完成真实发送验证。上传后从 GitHub 下载并验证 SHA-256 与本机附件一致。上传校验不代替独立干净 macOS 首次安装验证。
+创建 GitHub **预发行版**时使用 `docs/releases/0.4.4.md` 的说明，按[验证记录](m4.4-validation.md)列明真实范围：一次受控首次沟通与独立 AI 恢复已通过，不代表已有会话回复或 Auto 均已实测。上传后从 GitHub 下载并验证 SHA-256 与本机附件一致。上传校验不代替独立干净 macOS 首次安装验证。
