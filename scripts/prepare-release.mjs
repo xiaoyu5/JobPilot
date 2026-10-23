@@ -69,6 +69,7 @@ try {
   const manifest = JSON.parse(await readFile(resolve(reader, 'manifest.json'), 'utf8'));
   assert.deepEqual([...manifest.permissions].sort(), ['activeTab', 'scripting']);
   assert.equal(manifest.host_permissions, undefined);
+  assert.deepEqual(manifest.optional_host_permissions, ['https://www.zhipin.com/*']);
   assert.equal(manifest.background, undefined);
   const extensionFolder = resolve(temporary, 'JobPilot-BOSS-Reader');
   await mkdir(extensionFolder);

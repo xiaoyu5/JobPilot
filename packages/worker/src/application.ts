@@ -143,7 +143,7 @@ export class Application {
     this.active={id:run.id,controller,promise};return {runId:run.id};
   }
   async dispatch(action: Request['action'], payload: unknown, signal: AbortSignal,guiAuthorized=false): Promise<unknown> {
-    const readOnly=['status','config.get','dashboard.get','jobs.list','jobs.get','resume.list','search.get','search.list','workflow.schedule.get','run.list','run.get','queue.list','send.status','send.outbox','chat.list','chat.outbox','outcomes.list','stats.get','data.status','notifications.status'];
+    const readOnly=['status','config.get','dashboard.get','jobs.list','jobs.get','resume.list','search.get','search.list','workflow.schedule.get','run.list','run.get','queue.list','send.status','send.outbox','chat.list','chat.connection','chat.outbox','outcomes.list','stats.get','data.status','notifications.status'];
     if(this.workflow.busy&&!readOnly.includes(action)&&!['run.pause','send.stop'].includes(action))throw new AppError('RUN_ACTIVE','串联任务正在运行，请先暂停。');
     if(this.dataBusy&&!readOnly.includes(action))throw new AppError('RUN_ACTIVE','本机数据操作正在进行，请稍后重试。');
     if(!readOnly.includes(action)&&action!=='data.operation.cancel'&&action!=='send.stop'&&await this.data.pending())throw new AppError('RESTART_REQUIRED','已确认的数据操作等待重启；可在设置取消。');
@@ -174,6 +174,7 @@ export class Application {
       case 'chat.open': {this.consent();if(payload===undefined||payload===null)return this.browser.openChats();const job=this.store.getJob(Identifier.parse(payload).id);if(!job)throw new AppError('JOB_NOT_FOUND','岗位不存在。');return this.browser.openExistingChat(job,signal);}
       case 'chat.inbox.scan': this.consent();return this.chatting.scanInbox();
       case 'chat.watch.set': return this.chatting.setWatch(z.object({enabled:z.boolean()}).strict().parse(payload).enabled,guiAuthorized);
+      case 'chat.connection': this.consent();return this.browser.chatConnection();
       case 'chat.list': return this.chatting.list();
       case 'chat.scan': this.consent();return this.chatting.scan(payload===undefined?undefined:Identifier.parse(payload).id);
       case 'chat.ack.prepare': {const input=ChatAcknowledgementInput.parse(payload);return this.chatting.prepareAcknowledgement(input.id,input.choice,guiAuthorized);}

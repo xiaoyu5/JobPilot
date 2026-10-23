@@ -12,7 +12,7 @@ export const RpcRequest = z.object({
     'policy.get', 'policy.save', 'analysis.get', 'analysis.analyze', 'draft.generate', 'draft.update',
     'queue.list', 'queue.add', 'queue.review', 'queue.remove', 'dryrun.start', 'llm.env.load','llm.env.save',
     'send.status','send.policy.save','send.auto.set','send.prepare','send.commit','send.followup.prepare','send.followup.commit','send.stop','send.resume',
-    'send.outbox','send.verify','send.resolve','send.reset','send.cancel','send.checkpoint','boss.communication.inspect','chat.open','chat.scan','chat.inbox.scan','chat.watch.set','chat.list','chat.prepare','chat.ack.prepare','chat.commit','chat.auto.set','chat.auto.tick','chat.outbox','chat.resolve',
+    'send.outbox','send.verify','send.resolve','send.reset','send.cancel','send.checkpoint','boss.communication.inspect','chat.open','chat.connection','chat.scan','chat.inbox.scan','chat.watch.set','chat.list','chat.prepare','chat.ack.prepare','chat.commit','chat.auto.set','chat.auto.tick','chat.outbox','chat.resolve',
     'outcomes.list','outcomes.update','stats.get','diagnostics.export','data.status','data.backup','data.restore.prepare','data.restore.commit','data.reset','data.cleanup.preview','data.cleanup.commit','data.retention.save','data.operation.cancel',
     'notifications.status','notifications.save','notifications.test','notifications.check']),
   payload: z.unknown().optional(),
@@ -135,13 +135,13 @@ export function redact(text: string, secrets: string[] = []): string {
     .replace(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g, '[EMAIL]');
 }
 
-export type ChatMessage={id:string;direction:'incoming'|'outgoing'|'system';text:string;confirmed:boolean};
+export type ChatMessage={id:string;direction:'incoming'|'outgoing'|'system';text:string;confirmed:boolean;resumeRequest?:{state:'pending'|'accepted'|'declined'};attachment?:{name:string;delivered:boolean}};
 export type ConversationSnapshot={id:string;recruiterId:string;recruiterAliases?:string[];jobId:string|null;name:string;company:string;url:string;identityBound:boolean;historyComplete:boolean;messages:ChatMessage[];capturedAt:string};
 export type ChatState='REJECTED'|'WAITING'|'REPLY_NEEDED'|'REVIEW';
 export type ChatAcknowledgement='resume-consent'|'resume-decline';
 export const ChatAcknowledgementInput=z.object({id:z.string().min(1).max(200),choice:z.enum(['resume-consent','resume-decline'])}).strict();
 export type ChatConversation={id:string;recruiterId:string;name:string;company:string;state:ChatState;reason:string;version:number;lastInboundId:string|null;updatedAt:string;resumeRequest?:string};
-export type ChatReplyPlan={id:string;conversationId:string;inboundId:string;content:string;factIds:string[];resumeVersion:number;expiresAt:string;blocks:SendBlock[];acknowledgement?:ChatAcknowledgement;question?:string};
+export type ChatReplyPlan={id:string;conversationId:string;inboundId:string;content:string;factIds:string[];resumeVersion:number;expiresAt:string;blocks:SendBlock[];acknowledgement?:ChatAcknowledgement;question?:string;attachment?:{source:'boss-uploaded'}};
 
 export const OutcomeList=z.object({source:z.enum(['boss','demo']).default('boss'),query:z.string().max(100).default(''),limit:z.number().int().min(1).max(50).default(20),offset:z.number().int().min(0).max(10000).default(0)}).strict();
 export const OutcomeUpdate=z.object({jobId:z.string().min(1).max(200),expectedVersion:z.number().int().min(0),replied:z.boolean(),rejected:z.boolean(),interview:z.boolean(),note:z.string().trim().max(500).default('')}).strict().refine(value=>value.replied||!value.rejected&&!value.interview,'拒绝或邀面也属于对方已回复');
@@ -152,3 +152,5 @@ export type ExportResult={path:string;bytes:number;sha256:string};
 export type DataStatus={schema:number;backups:{name:string;path:string;bytes:number;createdAt:string}[];retentionDays:number;pendingOperation:'restore'|'reset'|null;operationError:{code:string;message:string}|null};
 export type RestorePlan={id:string;expiresAt:string;counts:{jobs:number;facts:number;conversations:number;firstContactIntents:number;replyIntents:number};schema:number;sha256:string};
 export type CleanupPlan={id:string;count:number;expiresAt:string;source:JobSource;before:string};
+
+export type ChatConnectionStatus={chromeOpen:boolean;pageReady:boolean;connected:boolean;currentBound:boolean;contacts:number};

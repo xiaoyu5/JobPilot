@@ -74,6 +74,8 @@ function refresh(){
       if(/[^A-Za-z0-9_~=-]/.test(candidate))set(entry,'data-jobpilot-redirect-id-other-punctuation','');
     }catch{}
   }
+  set(document.documentElement,'data-jobpilot-reader-connected','true');
+  publishKnownContacts();
   const root=conversationRoot();if(!root){indicator?.remove();indicator=undefined;return;}
   set(root,'data-jobpilot-reader-connected','true');
   set(root,'data-jobpilot-reader-boss-adapter','true');

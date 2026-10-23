@@ -5,4 +5,4 @@ for(const name of ['manifest.json','popup.html','popup.js'])await copyFile(`exte
 const result=await build({entryPoints:['packages/boss-adapter/src/page-bridge.ts'],bundle:true,platform:'browser',target:'es2022',format:'iife',globalName:'JobPilotPageBridge',write:false});
 // A final expression is needed for Chrome's executeScript result; diagnostics are business key names only.
 await writeFile(`${output}/bridge.js`,`(() => {${result.outputFiles[0].text}\nreturn JobPilotPageBridge.connectReadOnlyBridge();})()`);
-console.log('Built optional activeTab-only BOSS reader in .local/boss-reader. Not installed or enabled.');
+console.log('Built BOSS reader in .local/boss-reader. Single-click mode by default; remembered site access is optional and requires the user. Not installed or enabled.');

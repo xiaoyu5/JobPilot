@@ -3,10 +3,11 @@ import {scrollChat} from './chat-navigation.js';
 import {snapshot} from './snapshot.js';
 import {communicationIdentity,communicationInfo,composer,contactEntries} from './communication.js';
 import {conversationSnapshot,conversationRefused} from './conversation.js';
-type Input={operation:'prepare'|'submit'|'verify'|'contact-submit'|'contact-verify'|'chat-open'|'chat-history'|'chat-contacts'|'search-next'|'chat-continue';reset?:boolean;jobId:string;recruiterId:string;content:string;intentId:string;deadline:number;purpose?:'default-then-ai'|'first-contact-ai'|'reply';initialMessageId?:string;expectedInboundId?:string};
+import {performResume} from './resume-actions.js';
+type Input={operation:'prepare'|'submit'|'verify'|'contact-submit'|'contact-verify'|'chat-open'|'chat-history'|'chat-contacts'|'search-next'|'chat-continue'|'resume-prepare'|'resume-submit'|'resume-dialog-send'|'resume-verify';reset?:boolean;jobId:string;recruiterId:string;content:string;intentId:string;deadline:number;purpose?:'default-then-ai'|'first-contact-ai'|'reply';initialMessageId?:string;expectedInboundId?:string};
 export function perform(value:unknown){
   const input=value as Input,fail=(code:string,message:string)=>({ok:false,code,message});
-  if(!input||!['prepare','submit','verify','contact-submit','contact-verify','chat-open','chat-history','chat-contacts','search-next','chat-continue'].includes(input.operation)||!input.recruiterId||(!input.jobId&&input.purpose!=='reply')||typeof input.content!=='string'||input.content.length>1000)return fail('INVALID_SEND_INPUT','发送上下文无效。');
+  if(!input||!['prepare','submit','verify','contact-submit','contact-verify','chat-open','chat-history','chat-contacts','search-next','chat-continue','resume-prepare','resume-submit','resume-dialog-send','resume-verify'].includes(input.operation)||!input.recruiterId||(!input.jobId&&input.purpose!=='reply')||typeof input.content!=='string'||input.content.length>1000)return fail('INVALID_SEND_INPUT','发送上下文无效。');
   const page=snapshot();if(page.state!=='LOGGED_IN')return fail(page.state==='CHALLENGE'?'BOSS_CHALLENGE':page.state==='LOGIN_REQUIRED'?'BOSS_LOGIN_REQUIRED':'ADAPTER_CHANGED','页面未处于正常登录状态。');
   if(input.operation==='search-next'){if(!Number.isFinite(input.deadline)||Date.now()>input.deadline)return fail('ACTION_EXPIRED','读取动作已过期。');return advanceSearchPage();}
   if(input.operation==='chat-history'||input.operation==='chat-contacts'){if(!Number.isFinite(input.deadline)||Date.now()>input.deadline)return fail('ACTION_EXPIRED','读取动作已过期。');return scrollChat(input.operation==='chat-history'?'history':'contacts',input.recruiterId,input.reset);}
@@ -20,6 +21,7 @@ export function perform(value:unknown){
   const identity=communicationIdentity();
   const chat=conversationSnapshot(),messages=chat?.messages.filter(message=>message.direction!=='system')??[];
   if((input.jobId&&(identity.jobIds.length!==1||identity.jobIds[0]!==input.jobId))||identity.recruiterIds.length!==1||(identity.recruiterIds[0]!==input.recruiterId&&!chat?.recruiterAliases?.includes(input.recruiterId)))return fail('TARGET_MISMATCH','当前岗位或招聘人与已确认目标不一致。');
+  if(input.operation.startsWith('resume-'))return performResume(input,chat);
   if(input.operation==='chat-continue'){
     if(!Number.isFinite(input.deadline)||Date.now()>input.deadline)return fail('ACTION_EXPIRED','导航动作已过期。');
     const entries=contactEntries();if(entries.length!==1||entries[0].textContent?.trim()!=='继续沟通'||entries[0].matches(':disabled,[aria-disabled="true"],.disabled'))return fail('ALREADY_CONTACTED','仅允许点击明确的继续沟通入口，绝不点击立即沟通。');

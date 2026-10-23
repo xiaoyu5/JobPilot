@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "JobPilot BOSS 只读连接",
-  "version": "0.2.0",
-  "description": "仅在手动点击后，将当前 BOSS 页面已渲染的业务标识提供给本机 JobPilot；不发送消息。",
+  "version": "0.3.0",
+  "description": "将 BOSS 当前渲染的业务标识提供给本机 JobPilot；可手动连接或自愿记住只读连接，不发送消息。",
   "minimum_chrome_version": "111",
   "permissions": [
     "activeTab",
     "scripting"
   ],
+  "optional_host_permissions": ["https://www.zhipin.com/*"],
   "action": {
     "default_popup": "popup.html"
   },

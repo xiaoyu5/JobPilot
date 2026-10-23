@@ -1,7 +1,9 @@
+import type {ChatMessage,ConversationSnapshot} from '@jobpilot/contracts';
 import {renderedChatIdentity,renderedMessageId,renderedHistoryComplete} from './rendered-metadata.js';
 import {explicitRefusal} from '../../contracts/src/chat-rules.js';
 import {businessId as valid} from './business-id.js';
 import {startChatRoot,startChatIdentity,startChatMessages} from './start-chat.js';
+import {resumeMessageMetadata} from './resume-card.js';
 const visible=(node:Element)=>node.getClientRects().length>0;
 export function conversationRoot(){
   const start=startChatRoot();if(start)return start;
@@ -11,7 +13,7 @@ export function conversationRoot(){
   const roots=candidates.filter(node=>!candidates.some(other=>other!==node&&other.contains(node)));
   return roots.length===1?roots[0]:null;
 }
-export function visibleMessages(root:Element){
+export function visibleMessages(root:Element):ChatMessage[]{
   if(root.matches('.startchat-dialog'))return startChatMessages(root);
   const selector='.message-item,.chat-message-item,[data-message-id]';
   return [...root.querySelectorAll<HTMLElement>(selector)].filter(node=>visible(node)&&!node.parentElement?.closest(selector)).slice(-100).map(node=>{
@@ -21,10 +23,10 @@ export function visibleMessages(root:Element){
     const selector='.text,.message-text,.text-content,.message-content .content,.message-card-top-title,.message-card-top-sub-title';
     const body=[...node.querySelectorAll(selector)].filter(element=>!element.querySelector(selector)).map(element=>{const content=element.cloneNode(true) as Element;for(const receipt of content.querySelectorAll('.message-status,.item-time,.message-tip-bar,.message-controls'))receipt.remove();return content.textContent?.trim()??'';}).join('\n');
     const id=node.getAttribute('data-message-id')??node.getAttribute('data-mid')??renderedMessageId(node)??'';
-    return {id,direction:system?'system' as const:outgoing?'outgoing' as const:'incoming' as const,text:body.slice(0,4000),confirmed:!!id&&!/^(local|temp|pending)/i.test(id)&&!node.matches('.sending,.pending,.failed,.error')&&!node.querySelector('.sending,.pending,.failed,.error')};
+    return {id,direction:system?'system' as const:outgoing?'outgoing' as const:'incoming' as const,text:body.slice(0,4000),confirmed:!!id&&!/^(local|temp|pending)/i.test(id)&&!node.matches('.sending,.pending,.failed,.error')&&!node.querySelector('.sending,.pending,.failed,.error'),...resumeMessageMetadata(node)};
   });
 }
-export function conversationSnapshot(){
+export function conversationSnapshot():ConversationSnapshot|null{
   const root=conversationRoot();if(!root)return null;
   if(root.matches('.startchat-dialog')){const identity=startChatIdentity(root);return {id:identity?'boss-chat:'+identity.recruiterId:'',recruiterId:identity?.recruiterId??'',recruiterAliases:[],jobId:identity?.jobId??null,name:identity?.name??'',company:'',url:location.origin+location.pathname,identityBound:!!identity,historyComplete:false,messages:startChatMessages(root),capturedAt:new Date().toISOString()};}
   const ids=new Set<string>(),jobs=new Set<string>();
@@ -44,4 +46,4 @@ export function conversationSnapshot(){
   const start=[...root.querySelectorAll('.history-start,.history-end,.no-more-message,[data-history-complete]')].some(node=>visible(node)&&(node.getAttribute('data-history-complete')==='true'||/没有更多消息|已无更多|聊天记录到此/.test(node.textContent??'')));
   return {id:recruiterId?`boss-chat:${recruiterId}`:'',recruiterId,recruiterAliases,jobId:jobs.size===1?[...jobs][0]:null,name:displayedName.slice(0,80),company:root.querySelector('.company-name,.chat-company,.base-info > span:not(.base-title)')?.textContent?.trim().slice(0,120)??'',url:location.origin+location.pathname+(location.pathname==='/web/geek/chat'?'?'+new URLSearchParams([...new URL(location.href).searchParams].filter(([key])=>['bossId','encryptBossId','id','jobId','encryptJobId'].includes(key))).toString():''),identityBound:!!recruiterId&&ids.size===1,historyComplete:(start||renderedHistoryComplete(root))&&root.querySelectorAll('.message-item,.chat-message-item,[data-message-id]').length<=100,messages:visibleMessages(root),capturedAt:new Date().toISOString()};
 }
-export function conversationRefused(){const root=conversationRoot();return !!root&&visibleMessages(root).some(message=>message.direction!=='outgoing'&&explicitRefusal(message.text));}
+export function conversationRefused(){const root=conversationRoot();return !!root&&visibleMessages(root).some(message=>message.direction!=='outgoing'&&message.resumeRequest?.state!=='declined'&&explicitRefusal(message.text));}

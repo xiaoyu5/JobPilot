@@ -18,7 +18,7 @@ func run() throws -> [String: Any] {
     let args = CommandLine.arguments
     guard args.count >= 4, let pid = pid_t(args[1]), pid > 1,
           NSRunningApplication(processIdentifier: pid)?.bundleURL?.path == "/Applications/Google Chrome.app",
-          ["ready", "read", "navigate", "scroll", "greeting-prepare", "greeting-submit", "greeting-verify", "greeting-contact-submit", "greeting-contact-verify", "greeting-chat-open", "greeting-chat-history", "greeting-chat-contacts", "greeting-search-next", "greeting-chat-continue"].contains(args[2]) else {
+          ["ready", "read", "navigate", "scroll", "greeting-prepare", "greeting-submit", "greeting-verify", "greeting-contact-submit", "greeting-contact-verify", "greeting-chat-open", "greeting-chat-history", "greeting-chat-contacts", "greeting-search-next", "greeting-chat-continue", "greeting-resume-prepare", "greeting-resume-submit", "greeting-resume-dialog-send", "greeting-resume-verify"].contains(args[2]) else {
         throw BrowserError(code: "INVALID_BROWSER_TARGET", message: "专用浏览器目标无效。")
     }
     if args[2] == "ready" { return ["ready": NSRunningApplication(processIdentifier: pid)?.isFinishedLaunching ?? false] }
