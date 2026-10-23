@@ -118,12 +118,54 @@ export class SendingService {
     this.gui(gui);const row=this.store.db.prepare('SELECT * FROM send_plans WHERE id=?').get(planId) as Row|undefined;
     if(!row||row.used||Date.parse(row.expires_at)<this.clock())throw new AppError('CONFIRMATION_EXPIRED','发送确认已失效，请重新检查最终文案。');
     const plan=JSON.parse(row.detail_json) as SendPlan;
+    if(plan.recoveryOutboxId)throw new AppError('INVALID_SEND_PLAN','续发计划只能通过独立确认入口执行。');
     this.throwBlocks(plan.items.flatMap(item=>item.blocks));
     if(digest(plan.items.map(item=>this.fingerprint(item.queueId)))!==row.context_hash)throw new AppError('CONTEXT_CHANGED','确认后内容或配置发生变化，请重新检查。');
     this.throwBlocks([...this.baseBlocks(),...plan.items.flatMap(item=>this.itemBlocks(item.queueId,'review'))]);
     const id=randomUUID(),context=this.context();
     this.store.transaction(()=>{this.store.db.prepare('UPDATE send_plans SET used=1 WHERE id=? AND used=0').run(planId);this.store.db.prepare('INSERT INTO send_authorizations VALUES(?,?,?,?,?,?,NULL)').run(id,'review',this.policy().version,context,JSON.stringify(plan.items.map(item=>({jobId:item.jobId,draftId:item.draftId,draftVersion:item.draftVersion,deliveryKind:item.deliveryKind,messageUnits:item.messageUnits}))),this.now());});
     return this.begin(plan.items.map(item=>item.queueId),'review',id,context,undefined,Object.fromEntries(plan.items.map(item=>[item.queueId,item.deliveryKind??'direct'])));
+  }
+  private followupContext(record:OutboxRecord){return digest([record,this.context(),this.store.getSetting('sendStopRevision')??0,this.matching.validateForSend(record.draftId).draft]);}
+  private followupCheck(record:OutboxRecord){
+    if(record.state!=='NEEDS_VERIFY'||record.deliveryKind!=='default-then-ai'||!['INTENT','PREPARED'].includes(record.phase)||record.confirmedUnits>1||!['CLICK_DISPATCHED','CONFIRMED'].includes(record.defaultPhase))throw new AppError('FOLLOWUP_NOT_ELIGIBLE','只能继续有记录证明 AI 从未提交的两条首联；提交结果不明的 AI 绝不重发。');
+    const {job,draft,assessment}=this.matching.validateForSend(record.draftId);
+    if(record.policyVersion!==this.policy().version||record.resumeVersion!==draft.resumeVersion||record.draftVersion!==draft.version||record.content!==draft.content||record.recruiterId!==job.recruiterId)throw new AppError('CONTEXT_CHANGED','原发送规则、事实、文案或目标已变化，不能续发。');
+    if(this.statusNeedsVerify()!==1)throw new AppError('NEEDS_VERIFY','还有其他不确定发送，请先分别核验。');
+    const queue=this.store.db.prepare('SELECT id FROM review_queue WHERE draft_id=? AND job_id=?').get(draft.id,job.id) as Row|undefined;if(!queue)throw new AppError('QUEUE_NOT_FOUND','原审核条目不存在。');
+    this.throwBlocks([...this.baseBlocks(true).filter(b=>!['NEEDS_VERIFY','EMERGENCY_STOPPED'].includes(b.code)),...this.itemBlocks(queue.id,'review').filter(b=>!['DUPLICATE_SEND','ALREADY_CONTACTED'].includes(b.code))]);
+    return {job,draft,assessment,queue};
+  }
+  async prepareFollowup(id:string,signal:AbortSignal):Promise<SendPlan>{
+    if(this.current)throw new AppError('RUN_ACTIVE','已有发送任务运行中。');const record=this.record(id),value=this.followupCheck(record);
+    if(!this.transport.verifyContact)throw new AppError('ADAPTER_CHANGED','适配器不能核验默认招呼。');
+    const proof=await this.transport.verifyContact(value.job,signal);if(proof.state!=='CONFIRMED'||!proof.messageId)throw new AppError('NEEDS_VERIFY','当前目标的默认招呼仍缺少可靠回执，不能继续 AI。');
+    const plan:SendPlan={id:randomUUID(),mode:'review',policyVersion:record.policyVersion,recoveryOutboxId:id,expiresAt:new Date(this.clock()+300000).toISOString(),items:[{queueId:value.queue.id,jobId:record.jobId,title:record.title,company:record.company,recruiterId:record.recruiterId,draftId:record.draftId,draftVersion:record.draftVersion,content:record.content,deliveryKind:'direct',messageUnits:1,score:value.assessment.score,blocks:[]}]};
+    this.store.db.prepare('INSERT INTO send_plans VALUES(?,?,?,?,0)').run(plan.id,JSON.stringify({...plan,defaultProof:digest(proof.messageId)}),this.followupContext(record),plan.expiresAt);return plan;
+  }
+  commitFollowup(planId:string,gui:boolean){
+    this.gui(gui);if(this.current)throw new AppError('RUN_ACTIVE','已有发送任务运行中。');const saved=this.store.db.prepare('SELECT * FROM send_plans WHERE id=?').get(planId) as Row|undefined;
+    if(!saved||saved.used||Date.parse(saved.expires_at)<this.clock())throw new AppError('CONFIRMATION_EXPIRED','续发确认已失效，请重新只读检查。');
+    const plan=JSON.parse(saved.detail_json) as SendPlan&{defaultProof:string};if(!plan.recoveryOutboxId)throw new AppError('INVALID_SEND_PLAN','不是单条 AI 续发计划。');
+    const record=this.record(plan.recoveryOutboxId);this.followupCheck(record);if(saved.context_hash!==this.followupContext(record))throw new AppError('CONTEXT_CHANGED','续发检查后上下文已变化。');
+    const controller=new AbortController(),stamp=this.context(),stopRevision=this.store.getSetting('sendStopRevision')??0;
+    this.store.transaction(()=>{this.store.db.prepare('UPDATE send_plans SET used=1 WHERE id=?').run(plan.id);this.store.db.prepare('INSERT INTO send_authorizations VALUES(?,?,?,?,?,?,NULL)').run(randomUUID(),'review',record.policyVersion,stamp,JSON.stringify({outboxId:record.id,remainingAI:1,planId:plan.id}),this.now());this.store.event(record.runId,'AI_FOLLOWUP_AUTHORIZED','用户重新确认仅继续从未提交的 AI 文案；不重复平台默认招呼，保留原意图与两条额度。');});
+    this.heartbeat=this.clock();const watchdog=setInterval(()=>{const gap=this.clock()-this.heartbeat;if(gap>30000||gap<0)controller.abort(new AppError('SYSTEM_RESUMED','检测到休眠或时钟跳变，已停止续发。'));this.heartbeat=this.clock();},1000);watchdog.unref();
+    const promise=Promise.resolve().then(()=>this.executeFollowup(record,plan.defaultProof,stamp,stopRevision,controller.signal)).finally(()=>{clearInterval(watchdog);if(this.current?.id===record.runId)this.current=undefined;});this.current={id:record.runId,mode:'review',controller,promise};return {runId:record.runId};
+  }
+  private async executeFollowup(record:OutboxRecord,expectedProof:string,stamp:string,stopRevision:unknown,signal:AbortSignal){
+    let resumed=false;const check=()=>{signal.throwIfAborted();const gap=this.clock()-this.heartbeat;if(gap>30000||gap<0)throw new AppError('SYSTEM_RESUMED','检测到休眠或时钟跳变，已停止续发。');if(stamp!==this.context()||stopRevision!==(this.store.getSetting('sendStopRevision')??0))throw new AppError('CONTEXT_CHANGED','续发期间配置、事实或急停状态已变化。');this.throwBlocks(this.baseBlocks(true).filter(b=>!['NEEDS_VERIFY','EMERGENCY_STOPPED'].includes(b.code)));this.matching.validateForSend(record.draftId);};
+    try{
+      check();const {job}=this.followupCheck(this.record(record.id));if(!await this.health(signal))throw new AppError('LLM_UNAVAILABLE','模型服务不可用，未继续 AI。');check();
+      const last=this.budget().lastActionAt;while(last!==null&&this.clock()-last<this.policy().minIntervalSeconds*1000){await delay(250,undefined,{signal});check();}
+      const proof=await this.transport.verifyContact!(job,signal);if(proof.state!=='CONFIRMED'||!proof.messageId||digest(proof.messageId)!==expectedProof)throw new AppError('CONVERSATION_CHANGED','默认招呼回执或当前会话已变化，未继续 AI。');check();
+      this.store.transaction(()=>{const latest=this.record(record.id);this.followupCheck(latest);this.store.db.prepare("UPDATE send_outbox SET state='SENDING',default_phase='CONFIRMED',default_proof=?,confirmed_units=1,version=version+1 WHERE id=?").run(expectedProof,record.id);this.store.db.prepare("UPDATE runs SET state='SENDING',finished_at=NULL,error_code=NULL,sent_count=sent_count+?,needs_verify_count=max(0,needs_verify_count-1) WHERE id=?").run(1-latest.confirmedUnits,record.runId);});resumed=true;
+      await this.transport.prepareGreeting(job,record.content,signal,record.id,proof.messageId);check();
+      this.store.db.prepare("UPDATE send_outbox SET phase='PREPARED',version=version+1 WHERE id=?").run(record.id);this.store.event(record.runId,'GREETING_PREPARED','仅 AI 文案编辑完成，平台默认招呼没有重发。');check();
+      this.store.db.prepare("UPDATE send_outbox SET phase='CLICK_DISPATCHED',version=version+1 WHERE id=?").run(record.id);this.store.setSetting('lastSendActionAt',this.now());this.store.event(record.runId,'SEND_CLICK_DISPATCHED','提交重新确认的单条 AI 文案。');
+      await this.transport.submitGreeting(job,record.content,signal,record.id,proof.messageId);this.store.setSetting('lastSendActionAt',this.now());const result=await this.transport.verifyGreeting(job,record.content,signal);
+      if(result.state!=='CONFIRMED')throw new AppError('NEEDS_VERIFY',result.message);this.confirm(record.id,result.messageId??'visible-confirmation');this.store.finishRun(record.runId,'COMPLETED');this.store.db.prepare('UPDATE runs SET checkpoint_json=NULL WHERE id=?').run(record.runId);this.store.event(record.runId,'SENT_CONFIRMED','默认招呼及重新确认的 AI 文案均有页面回执；原意图完成。');
+    }catch(error){if(resumed){this.store.db.prepare("UPDATE send_outbox SET state='NEEDS_VERIFY',verify_detail=?,version=version+1 WHERE id=? AND state='SENDING'").run('AI 续发已停止；请核验，禁止自动重发。',record.id);this.store.db.prepare('UPDATE runs SET needs_verify_count=needs_verify_count+1 WHERE id=?').run(record.runId);}this.store.finishRun(record.runId,'NEEDS_HUMAN','NEEDS_VERIFY');this.store.event(record.runId,'NEEDS_VERIFY',error instanceof AppError?error.message:'AI 续发停止，保留原意图及去重锁。');}
   }
   startAuto(){
     if(!this.isAutoAuthorized())throw new AppError('CONSENT_REQUIRED','Auto 尚未在界面启用，MCP 无法代为授权。');
@@ -225,7 +267,7 @@ export class SendingService {
   }
   private confirm(id:string,messageId:string){this.store.transaction(()=>{const record=this.record(id);if(!['SENDING','NEEDS_VERIFY'].includes(record.state))return;this.store.db.prepare("UPDATE send_outbox SET state='SENT_CONFIRMED',confirmed_units=message_units,phase='CONFIRMED',sent_at=?,verify_detail=?,version=version+1 WHERE id=?").run(this.now(),'页面消息确认：'+digest(messageId).slice(0,20),id);this.store.db.prepare('UPDATE runs SET processed_count=processed_count+1,sent_count=sent_count+?,needs_verify_count=max(0,needs_verify_count-?) WHERE id=?').run(record.messageUnits-record.confirmedUnits,record.state==='NEEDS_VERIFY'?1:0,record.runId);});}
   pause(id?:string){if(this.current&&(!id||this.current.id===id))this.current.controller.abort();return {accepted:true};}
-  stop(){this.store.setSetting('sendEmergencyStop',true);this.revokeAuto();this.pause();return {stopped:true};}
+  stop(){this.store.setSetting('sendEmergencyStop',true);this.store.setSetting('sendStopRevision',(this.store.getSetting<number>('sendStopRevision')??0)+1);this.revokeAuto();this.pause();return {stopped:true};}
   reset(gui:boolean){this.gui(gui);if(this.current)throw new AppError('RUN_ACTIVE','请等待当前动作停止。');if(this.status().needsVerify)throw new AppError('NEEDS_VERIFY','请先核验不确定发送记录。');this.store.setSetting('sendEmergencyStop',false);return {reset:true};}
   async verify(id:string,signal:AbortSignal){
     if(this.current)throw new AppError('RUN_ACTIVE','请等待当前任务停止后核验。');const record=this.record(id);

@@ -1,5 +1,15 @@
 import React,{useState} from 'react';
-import type {FactCategoryName} from '@jobpilot/contracts';
+import type {FactCategoryName,ResumeState} from '@jobpilot/contracts';
+import {chooseResume,request} from './api';
+
+type ImportResult=ResumeState&{warnings:string[];importSummary?:{added:number;duplicates:number;archived:number;retained:number}};
+export function ResumeImportButton({resume,disabled,act,onImported}:{resume:ResumeState|undefined;disabled:boolean;act:(name:string,fn:()=>Promise<unknown>)=>void;onImported:(value:ImportResult)=>void}){
+  const [plan,setPlan]=useState<{path:string;version:number;archived:number;manual:number}>(),[mode,setMode]=useState<'merge'|'replace-imported'>('merge'),[ack,setAck]=useState(false),[error,setError]=useState('');
+  return <><button disabled={disabled} onClick={()=>act('choose-resume',async()=>{const path=await chooseResume();if(!path)return;const old=resume?.facts.filter(f=>f.source.kind==='docx'||f.source.kind==='pdf').length??0;setPlan({path,version:resume?.version??1,archived:old,manual:(resume?.facts.length??0)-old});setMode('merge');setAck(false);setError('');})}>导入简历</button>
+    {plan&&<div className="modal-backdrop"><section className="panel confirm-modal" role="dialog" aria-modal="true" aria-labelledby="resume-import-title"><div className="section-title"><h2 id="resume-import-title">选择简历导入方式</h2><button className="text-button" disabled={disabled} onClick={()=>setPlan(undefined)}>取消</button></div><p>{plan.path.split('/').at(-1)}</p><label>导入方式<select aria-label="简历导入方式" value={mode} disabled={disabled} onChange={e=>{setMode(e.target.value as typeof mode);setAck(false);}}><option value="merge">合并新增事实，相同内容去重</option><option value="replace-imported">以新版替换旧简历，保留手动补充</option></select></label>
+    <p>{mode==='replace-imported'?`归档旧简历 ${plan.archived} 条，保留手动补充 ${plan.manual} 条及旧快照；新版事实全部待审核。`:'保留现有事实，新增内容待审核；相同文字与类别不会重复新增。'}</p><p className="hint">导入会撤销当前冻结并使旧匹配与草稿失效；不会自动确认任何新经历。</p>{error&&<p role="alert" className="audit-issue">{error}</p>}<label className="checkbox"><input aria-label="确认简历导入方式" type="checkbox" checked={ack} disabled={disabled} onChange={e=>setAck(e.target.checked)}/>我已核对导入方式与保留范围</label><div className="actions"><button disabled={disabled||!ack} onClick={()=>act('import',async()=>{try{const result=await request<ImportResult>('resume.import',{path:plan.path,mode,expectedVersion:plan.version});onImported(result);setPlan(undefined);}catch(e){setError(e instanceof Error?e.message:'导入失败。');}})}>导入为待审核事实</button><button className="secondary" disabled={disabled} onClick={()=>setPlan(undefined)}>取消导入</button></div></section></div>}
+  </>;
+}
 
 export function ManualFactForm({version,disabled,onAdd}:{version:number;disabled:boolean;onAdd:(input:{expectedVersion:number;text:string;category:FactCategoryName})=>Promise<void>}){
   const [text,setText]=useState(''),[category,setCategory]=useState<FactCategoryName>('skill');

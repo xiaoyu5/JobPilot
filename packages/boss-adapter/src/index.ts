@@ -5,6 +5,7 @@ import { chromium, type BrowserContext, type Page } from 'playwright-core';
 import { AppError, redact, type JobRecord, type LoginState, type SearchProfileData } from '@jobpilot/contracts';
 
 export { searchUrl, extractSearchDom, extractDetailDom, normalizeCard } from './dom.js';
+export {normalizeJobText,decodeBossDigits} from './job-text.js';
 import { searchUrl, extractSearchDom, extractDetailDom, normalizeCard } from './dom.js';
 export { NativeChrome as BrowserProbe } from './native.js';
 

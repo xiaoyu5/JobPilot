@@ -19,7 +19,7 @@ try{
   });
   await page.addInitScript('window.__TAURI_INTERNALS__ = { invoke: function(command, args) { return window.__jobpilotInvoke(command, args); } };');
   await page.goto('http://127.0.0.1:1420/#/dashboard');await page.getByText('● 本机已连接',{exact:true}).waitFor({timeout:10000}).catch(async error=>{console.error('UI errors:',errors);console.error((await page.locator('body').innerText()).slice(0,2000));throw error;});
-  await page.getByRole('link',{name:'▧ 简历事实库'}).click();await page.getByRole('button',{name:'导入简历',exact:true}).click();
+  await page.getByRole('link',{name:'▧ 简历事实库'}).click();await page.getByRole('button',{name:'导入简历',exact:true}).click();await page.getByLabel('确认简历导入方式').check();await page.getByRole('button',{name:'导入为待审核事实',exact:true}).click();
   await page.locator('.fact-card').first().waitFor();assert.equal(await page.locator('.fact-card.approved').count(),0);
   await page.locator('.fact-card').first().getByRole('button',{name:'确认事实',exact:true}).click();await page.locator('.fact-card.approved').waitFor();
   await page.getByRole('button',{name:'冻结已确认事实',exact:true}).click();await page.getByText(/已冻结 v/).waitFor();

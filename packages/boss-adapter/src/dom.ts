@@ -1,4 +1,6 @@
 import { AppError, redact, type JobRecord, type SearchProfileData } from '@jobpilot/contracts';
+import {normalizeJobText} from './job-text.js';
+export {normalizeJobText,decodeBossDigits} from './job-text.js';
 
 export function searchUrl(profile: SearchProfileData) {
   const url = new URL(profile.searchUrl || 'https://www.zhipin.com/web/geek/jobs');
@@ -17,7 +19,7 @@ export function normalizeCard(raw: ReturnType<typeof extractSearchDom>[number]):
   const match = url.pathname.match(/^\/job_detail\/([a-zA-Z0-9_-]+)\.html$/);
   if (url.protocol !== 'https:' || url.hostname !== 'www.zhipin.com' || !match || !raw.title || !raw.company) throw new AppError('ADAPTER_CHANGED', '职位卡片缺少必要字段，已停止读取。');
   const jobId = match[1]; url.search = ''; url.hash = '';
-  const title = redact(raw.title).slice(0, 200), company = redact(raw.company).slice(0, 200);
-  const salary = redact(raw.salary).slice(0, 80), city = redact(raw.city).slice(0, 100), tags = raw.tags.map(tag => redact(tag).slice(0, 100));
+  const fields=normalizeJobText(raw.title,raw.salary),title = redact(fields.title).slice(0, 200), company = redact(raw.company).slice(0, 200);
+  const salary = redact(fields.salary).slice(0, 80), city = redact(raw.city).slice(0, 100), tags = raw.tags.map(tag => redact(tag).slice(0, 100));
   return {id: `boss:${jobId}`, platformJobId: jobId, recruiterId: raw.recruiterId, source: 'boss', title, company, salary, city, experience: tags.find(t => /经验|[0-9].*年/.test(t)) ?? '', education: tags.find(t => /本科|大专|硕士|博士|学历/.test(t)) ?? '', url: url.toString(), jdText: '', jdHash: '', fetchedAt: new Date().toISOString(), snapshot: JSON.stringify({adapterVersion: 'boss-dom-m1', card: {title, company, salary, city, url: url.toString()}}), alreadyContacted: raw.alreadyContacted};
 }

@@ -20,7 +20,7 @@ test('optional activeTab bridge exposes only current rendered business identity 
     await page.evaluate(()=>{(document.querySelector('.chat-record') as any).__vue__.$props.boss.encryptBossId='opaque_hr~~';history.replaceState(null,'','/web/geek/chat?id=opaque_hr%7E%7E&jobId=fixture_job');});
     await page.evaluate(await readFile('.local/boss-reader/bridge.js','utf8'));
     const aliased=(await read()).conversation;assert.equal(aliased.identityBound,true);assert.equal(aliased.recruiterId,'123456789');assert.deepEqual(aliased.recruiterAliases,['123456789','opaque_hr~~']);
-    const actions=await readFile('dist/worker/browser-actions.js','utf8');const proof=JSON.parse(await page.evaluate(actions.replace('__JOBPILOT_INPUT__',JSON.stringify({operation:'contact-verify',jobId:'fixture_job',recruiterId:'opaque_hr~~',content:'',intentId:'fixture-read-only',deadline:Date.now()+3000}))) as string);assert.equal(proof.data.messageId,'server_1');
+    const actions=await readFile('dist/worker/browser-actions.js','utf8');const proof=JSON.parse(await page.evaluate(actions.replace('__JOBPILOT_INPUT__',JSON.stringify({operation:'contact-verify',jobId:'fixture_job',recruiterId:'opaque_hr~~',content:'',intentId:'fixture-read-only',deadline:Date.now()+3000}))) as string);assert.equal(proof.data.state,'UNKNOWN','a conversation with an inbound refusal is not a fresh default-only contact');
     // Real main chat-record shape: history=false alone is also the initial state.
     await page.evaluate(()=>{const record=document.querySelector('.chat-record') as any;record.__vue__.$data={boss:record.__vue__.$props.boss,history:false,loading:false,isToTop:false,msgMinId:0};});
     const reconnect=async()=>page.evaluate(await readFile('.local/boss-reader/bridge.js','utf8'));

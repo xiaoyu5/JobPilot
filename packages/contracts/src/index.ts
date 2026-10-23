@@ -11,7 +11,7 @@ export const RpcRequest = z.object({
     'run.list', 'run.get', 'run.pause', 'demo.load', 'dashboard.get', 'boss.diagnostics',
     'policy.get', 'policy.save', 'analysis.get', 'analysis.analyze', 'draft.generate', 'draft.update',
     'queue.list', 'queue.add', 'queue.review', 'queue.remove', 'dryrun.start', 'llm.env.load','llm.env.save',
-    'send.status','send.policy.save','send.auto.set','send.prepare','send.commit','send.stop','send.resume',
+    'send.status','send.policy.save','send.auto.set','send.prepare','send.commit','send.followup.prepare','send.followup.commit','send.stop','send.resume',
     'send.outbox','send.verify','send.resolve','send.reset','send.cancel','send.checkpoint','boss.communication.inspect','chat.open','chat.scan','chat.list','chat.prepare','chat.commit','chat.auto.set','chat.auto.tick','chat.outbox','chat.resolve',
     'outcomes.list','outcomes.update','stats.get','diagnostics.export','data.status','data.backup','data.restore.prepare','data.restore.commit','data.reset','data.cleanup.preview','data.cleanup.commit','data.retention.save','data.operation.cancel',
     'notifications.status','notifications.save','notifications.test','notifications.check']),
@@ -42,7 +42,8 @@ export type FactSource = {file: string; kind: 'docx' | 'pdf' | 'text'; page?: nu
 export type PendingFact = {text: string; category: FactCategoryName; source: FactSource};
 export type ResumeFact = PendingFact & {id: string; approved: boolean; version: number; updatedAt: string};
 export type ResumeState = {version: number; frozenVersion: number | null; facts: ResumeFact[]; approvedCount: number};
-export const ResumeImport = z.object({path: z.string().min(1).max(4096)}).strict();
+export const ResumeFile = z.object({path: z.string().min(1).max(4096)}).strict();
+export const ResumeImport = ResumeFile.extend({mode:z.enum(['merge','replace-imported']).default('merge'),expectedVersion:z.number().int().min(1).optional()}).strict().refine(v=>v.mode!=='replace-imported'||v.expectedVersion!==undefined,'替换旧简历需核对事实库版本');
 export const FactAdd = z.object({expectedVersion:z.number().int().min(1),text:z.string().trim().min(5).max(2000),category:FactCategory.default('skill'),sourceQuote:z.string().trim().min(1).max(4000).optional()}).strict();
 export const FactUpdate = z.object({id: z.string().uuid(), expectedVersion: z.number().int().min(1), text: z.string().trim().min(1).max(2000).optional(), category: FactCategory.optional(), approved: z.boolean().optional(), deleted: z.boolean().optional()}).strict();
 export const SearchProfile = z.object({id: z.literal('primary').default('primary'), name: z.string().trim().min(1).max(80), keyword: z.string().trim().min(1).max(80), searchUrl: z.string().max(2048).default(''), maxJobs: z.number().int().min(1).max(50).default(20)}).strict();
@@ -117,7 +118,7 @@ export type SendBlock={code:string;message:string};
 export type ContactKind='instant-send'|'continue-chat'|'editable'|'edit-preview'|'unknown'|'ambiguous';
 export type CommunicationInspection={entryKind?:ContactKind;jobId:string;recruiterId:string|null;identityBound:boolean;composerReady:boolean;canOpenPreview:boolean;alreadyContacted:boolean;message:string;url:string;adapterVersion:string};
 export type SendVerification={state:'CONFIRMED'|'UNKNOWN';messageId?:string;message:string};
-export type SendPlan={id:string;mode:'review';policyVersion:number;expiresAt:string;items:{queueId:string;jobId:string;title:string;company:string;recruiterId:string|null;draftId:string;draftVersion:number;content:string;deliveryKind?:'direct'|'default-then-ai';messageUnits?:number;score:number|null;blocks:SendBlock[]}[]};
+export type SendPlan={id:string;mode:'review';policyVersion:number;expiresAt:string;recoveryOutboxId?:string;items:{queueId:string;jobId:string;title:string;company:string;recruiterId:string|null;draftId:string;draftVersion:number;content:string;deliveryKind?:'direct'|'default-then-ai';messageUnits?:number;score:number|null;blocks:SendBlock[]}[]};
 export type OutboxRecord={id:string;runId:string;jobId:string;title:string;company:string;recruiterId:string;draftId:string;draftVersion:number;messageUnits:number;confirmedUnits:number;deliveryKind:'direct'|'default-then-ai';defaultPhase:string;state:'SENDING'|'SENT_CONFIRMED'|'NEEDS_VERIFY'|'MANUALLY_CONFIRMED'|'NOT_SENT'|'PARTIAL_CONFIRMED';phase:'INTENT'|'PREPARED'|'CLICK_DISPATCHED'|'CONFIRMED';policyVersion:number;resumeVersion:number;contentHash:string;content:string;createdAt:string;sentAt:string|null;detail:string;version:number};
 export type SendingStatus={policy:SendPolicy;autoModeConsent:boolean;emergencyStopped:boolean;activeRunId:string|null;mode:string;budget:{usedToday:number;runsToday:number;lastIntentAt:number|null;lastActionAt:number|null};needsVerify:number};
 export const SendSelection=z.object({queueIds:z.array(z.string().uuid()).min(1).max(20)}).strict();

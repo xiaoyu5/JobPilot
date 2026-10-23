@@ -3,7 +3,7 @@ import {FactAdd} from '@jobpilot/contracts';
 import { AppError, AnalyzeInput, ConfigUpdate, DraftInput, DraftUpdate, DryRunInput, FactUpdate, JobListQuery, QueueInput, QueueList, QueueReview, ResumeImport, SearchProfile, StartRun,SendSelection,SendCommit,SendResolve, type Request, type JobSource, type JobRecord, type WorkerStatus, type LlmConfiguration } from '@jobpilot/contracts';
 import { Store,listOutcomes,updateOutcome,conversionStats } from '@jobpilot/store';
 import {OutcomeList,OutcomeUpdate,StatsQuery} from '@jobpilot/contracts';
-import { BrowserProbe, searchUrl } from '@jobpilot/boss-adapter';
+import { BrowserProbe, searchUrl,normalizeJobText } from '@jobpilot/boss-adapter';
 import { parseResume } from '@jobpilot/resume';
 import { testConnection, validateEndpoint } from '@jobpilot/llm';
 import { demoJobs } from '../../../fixtures/boss/demo-jobs.js';
@@ -35,7 +35,10 @@ export class Application {
   private importing = false;
   private started = Date.now();
   constructor(dataDir: string,options:{chatTransport?:ChatTransport;transport?:SendTransport;health?:(signal:AbortSignal)=>Promise<boolean>;clock?:()=>number;notifications?:{fetch?:typeof fetch;intervalMs?:number;timeoutMs?:number}}={}) {
-    this.store = new Store(dataDir); this.browser = new BrowserProbe(dataDir); this.matching = new MatchingService(this.store,()=>this.llmConfiguration());
+    this.store = new Store(dataDir); this.browser = new BrowserProbe(dataDir);
+    // Repair cached BOSS display fields as well as future reads. Delivery evidence is untouched.
+    for(let offset=0;;offset+=100){const page=this.store.listJobs({source:'boss',limit:100,offset});for(const job of page.items){try{const fields=normalizeJobText(job.title,job.salary);if(fields.title!==job.title||fields.salary!==job.salary)this.store.upsertJob({...job,...fields});}catch{ /* Unknown encoding stays blocked until a real page refresh. */ }}if(offset+100>=page.total)break;}
+    this.matching = new MatchingService(this.store,()=>this.llmConfiguration());
     this.environmentPath=this.store.config().llmEnvPath??join(dataDir,'.env');
     if(this.store.config().llmEnvPath||existsSync(this.environmentPath))try{this.useEnvironment(readEnvironment(this.environmentPath));}catch(error){this.environmentError=error instanceof AppError?error.message:'环境配置读取失败，请在设置重新选择文件。';}
     this.sending=new SendingService(this.store,this.matching,options.transport??this.browser,options.health??(signal=>this.llm(async()=>{const result=await testConnection(this.llmConfiguration(),signal);this.store.setSetting('llmHealth',{healthy:result.healthy,checkedAt:new Date().toISOString()});return result.healthy;},true)),options.clock);
@@ -153,7 +156,7 @@ export class Application {
       case 'diagnostics.export': return this.maintain(guiAuthorized,()=>this.data.exportDiagnostics(payload===undefined||payload===null?undefined:Identifier.parse(payload).id));
       case 'data.status': return this.data.statusData();
       case 'data.backup': return this.maintain(guiAuthorized,()=>this.data.backup());
-      case 'data.restore.prepare': return this.maintain(guiAuthorized,()=>this.data.prepareRestore(ResumeImport.parse(payload).path));
+      case 'data.restore.prepare': return this.maintain(guiAuthorized,()=>this.data.prepareRestore(z.object({path:z.string().min(1).max(4096)}).strict().parse(payload).path));
       case 'data.restore.commit': return this.maintain(guiAuthorized,()=>{const input=z.object({id:z.string().uuid(),confirmed:z.literal(true)}).strict().parse(payload);if(this.sending.statusNeedsVerify())throw new AppError('NEEDS_VERIFY','请先核验当前不确定发送，再恢复备份。');return this.data.commitRestore(input.id);});
       case 'data.reset': return this.maintain(guiAuthorized,async()=>{z.object({confirmation:z.literal('清除 JobPilot 本机数据')}).strict().parse(payload);if(this.sending.statusNeedsVerify())throw new AppError('NEEDS_VERIFY','请先核验当前不确定发送，再清除本机数据。');await this.browser.close();return this.data.reset();});
       case 'data.operation.cancel': return this.maintain(guiAuthorized,()=>this.data.cancel());
@@ -177,6 +180,8 @@ export class Application {
       case 'send.auto.set': return this.sending.setAuto(z.object({enabled:z.boolean()}).strict().parse(payload).enabled,guiAuthorized);
       case 'send.prepare': {if(this.active||this.llmBusy)throw new AppError('RUN_ACTIVE','请先等待当前任务结束。');return this.sending.prepare(SendSelection.parse(payload).queueIds,signal);}
       case 'send.commit': {if(this.active||this.llmBusy)throw new AppError('RUN_ACTIVE','已有任务运行中。');return this.sending.commit(SendCommit.parse(payload).planId,guiAuthorized);}
+      case 'send.followup.prepare': return this.sending.prepareFollowup(Identifier.parse(payload).id,signal);
+      case 'send.followup.commit': {if(this.active||this.llmBusy)throw new AppError('RUN_ACTIVE','已有任务运行中。');return this.sending.commitFollowup(SendCommit.parse(payload).planId,guiAuthorized);}
       case 'send.outbox': {const input=QueueList.parse(payload??{});return this.sending.outbox(input.limit,input.offset);}
       case 'send.verify': return this.sending.verify(Identifier.parse(payload).id,signal);
       case 'send.resolve': {const input=SendResolve.parse(payload);return this.sending.resolve(input.id,input.expectedVersion,input.result,guiAuthorized);}
@@ -219,7 +224,7 @@ export class Application {
       case 'resume.import': {
         if (this.importing) throw new AppError('IMPORT_BUSY', '已有简历正在解析。');
         this.importing = true;
-        try { const parsed = await parseResume(ResumeImport.parse(payload).path, signal); signal.throwIfAborted(); return {...this.store.importFacts(parsed.file, parsed.hash, parsed.facts), warnings: parsed.warnings}; }
+        try { const input=ResumeImport.parse(payload),parsed = await parseResume(input.path, signal); signal.throwIfAborted(); return {...this.store.importFacts(parsed.file, parsed.hash, parsed.facts,input), warnings: parsed.warnings}; }
         finally { this.importing = false; }
       }
       case 'resume.list': return this.store.resume();

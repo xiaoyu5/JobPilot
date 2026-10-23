@@ -38,10 +38,10 @@ export function contactEntries(){
   return [...new Set(roots.flatMap(root=>[...root.querySelectorAll<HTMLElement>('a,button')]))].filter(node=>visible(node)&&!node.closest('.more-job-section,.job-card-wrapper,.job-card-box,.recommend-list')&&/^(立即沟通|继续沟通|已沟通)$/.test(text(node)));
 }
 export function composer(){
-  const scopes=[...document.querySelectorAll<HTMLElement>('.greet-dialog,.greeting-dialog,.greet-dialog-wrap,.chat-conversation,.chat-content,.chat-box')].filter(visible);
+  const scopes=[...document.querySelectorAll<HTMLElement>('.greet-dialog,.greeting-dialog,.greet-dialog-wrap,.startchat-dialog,.chat-conversation,.chat-content,.chat-box')].filter(visible);
   const pairs=scopes.flatMap(scope=>[...scope.querySelectorAll<HTMLElement>('textarea,[contenteditable="true"]')].filter(visible).map(input=>({scope,input})));
   const uniqueInputs=[...new Map(pairs.map(pair=>[pair.input,pair])).values()];if(uniqueInputs.length!==1)return null;
-  const pair=uniqueInputs[0],buttons=[...pair.scope.querySelectorAll<HTMLElement>('button,a[role="button"],.btn-send')].filter(node=>visible(node)&&/^(发送|发送招呼语)$/.test(text(node)));
+  const pair=uniqueInputs[0],buttons=[...pair.scope.querySelectorAll<HTMLElement>('button,a[role="button"],.btn-send,.startchat-dialog .send-message')].filter(node=>visible(node)&&/^(发送|发送招呼语)$/.test(text(node)));
   if(buttons.length===1)return {...pair,button:buttons[0],sendBy:'button' as const};
   if(!buttons.length&&/按\s*Enter\s*键发送/i.test(pair.scope.textContent??''))return {...pair,button:null,sendBy:'enter' as const};
   return null;

@@ -1,6 +1,6 @@
 # GitHub 发行
 
-仓库：<https://github.com/xiaoyu5/JobPilot>。当前目标为 0.4.2 预发行版，不上架 App Store；Developer ID 签名和 Apple 公证为可选改进。
+仓库：<https://github.com/xiaoyu5/JobPilot>。当前目标为 0.4.4 预发行版，不上架 App Store；Developer ID 签名和 Apple 公证为可选改进。
 
 ## 准备文件
 
@@ -16,7 +16,7 @@ npm run release:prepare
 
 安装和 bundle 冒烟会启动隔离测试 App；请先正常退出正在运行的实际 JobPilot，以免 macOS 单实例保护拦截测试。测试使用临时匿名数据，不使用真实账户。
 
-`release:prepare` 对最终 DMG 作完整性检查，只读挂载并检查内部 App 的版本、完整签名结构、捆绑 Node 和资源文件名；检查只读扩展仅有 activeTab / scripting 权限。汇集以下固定输入至 gitignored `.local/releases/0.4.2/`：
+`release:prepare` 对最终 DMG 作完整性检查，只读挂载并检查内部 App 的版本、完整签名结构、捆绑 Node 和资源文件名；检查只读扩展仅有 activeTab / scripting 权限。汇集以下固定输入至 gitignored `.local/releases/0.4.4/`：
 
 - DMG；
 - 独立可手动加载的只读扩展 ZIP；
@@ -29,6 +29,6 @@ npm run release:prepare
 
 `.gitignore` 排除原始需求目录（含真实简历背景）、本机 `.env`、数据库、Chrome Profile、私密备份、证据日志和构建产物。不要使用 `git add -f` 绕过。公开产品说明位于 `docs/product-scope.md`，原始资料在本机保留。
 
-只上传 `.local/releases/0.4.2/` 中的固定发行文件，不上传 `.local/` 其余内容。源码作为常规 Git 提交推送，DMG 和扩展 ZIP 作为 Release 附件。项目自身的开源许可证尚未选择；不自动替作者授予 MIT 等许可，第三方组件仍受各自许可证约束。
+只上传 `.local/releases/0.4.4/` 中的固定发行文件，不上传 `.local/` 其余内容。源码作为常规 Git 提交推送，DMG 和扩展 ZIP 作为 Release 附件。项目自身的开源许可证尚未选择；不自动替作者授予 MIT 等许可，第三方组件仍受各自许可证约束。
 
-真实发送尚未验收，创建 GitHub **预发行版**时使用 `docs/releases/0.4.2.md` 的说明，不能标记为完成真实发送验证。上传后从 GitHub 下载并验证 SHA-256 与本机附件一致。上传校验不代替独立干净 macOS 首次安装验证。
+真实发送尚未验收，创建 GitHub **预发行版**时使用 `docs/releases/0.4.4.md` 的说明，不能标记为完成真实发送验证。上传后从 GitHub 下载并验证 SHA-256 与本机附件一致。上传校验不代替独立干净 macOS 首次安装验证。

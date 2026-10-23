@@ -22,7 +22,7 @@ export function perform(value:unknown){
     const inboundIndex=messages.findIndex(message=>message.direction==='incoming'&&message.id===input.expectedInboundId);
     const eligible=input.purpose==='reply'?(inboundIndex<0?[]:outgoing.filter(message=>messages.findIndex(item=>item.id===message.id)>inboundIndex)):outgoing;
     const matches=eligible.filter(message=>message.text===input.content.trim());
-    const proof=input.operation==='contact-verify'?(outgoing.length===1&&outgoing[0].text.trim()&&!/\.(pdf|docx?)$/i.test(outgoing[0].text.trim())?outgoing[0]:undefined):(matches.length===1?matches[0]:undefined);
+    const proof=input.operation==='contact-verify'?(outgoing.length===1&&!messages.some(message=>message.direction==='incoming')&&outgoing[0].text.trim()&&!/\.(pdf|docx?)$/i.test(outgoing[0].text.trim())?outgoing[0]:undefined):(matches.length===1?matches[0]:undefined);
     if(proof){const field=composer()?.input;if(field?.dataset.jobpilotIntent&&field.dataset.jobpilotSubmitted===field.dataset.jobpilotIntent)field.dataset.jobpilotVerified=field.dataset.jobpilotIntent;}
     return {ok:true,data:proof?{state:'CONFIRMED',messageId:proof.id,message:'目标会话可见消息已确认。'}:{state:'UNKNOWN',message:'未找到可靠对应消息，请人工核验；不会自动重发。'}};
   }
@@ -55,7 +55,7 @@ export function perform(value:unknown){
   }
   const actual=field instanceof HTMLTextAreaElement?field.value:field.textContent??'';
   if(field.dataset.jobpilotIntent!==input.intentId||actual!==input.content||field.dataset.jobpilotSubmitted)return fail('DRAFT_CHANGED','文案或提交状态已变化。');
-  if(button?.matches(':disabled,[aria-disabled="true"],.disabled'))return fail('ADAPTER_CHANGED','发送按钮不可用。');
+  if(button?.matches(':disabled,[aria-disabled="true"],.disabled,.disable'))return fail('ADAPTER_CHANGED','发送按钮不可用。');
   if(Date.now()>input.deadline)return fail('ACTION_EXPIRED','动作授权已过期。');
   field.dataset.jobpilotSubmitted=input.intentId;
   if(sendBy==='button')button!.click();else field.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',code:'Enter',keyCode:13,which:13,bubbles:true,cancelable:true}));

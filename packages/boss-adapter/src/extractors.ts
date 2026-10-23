@@ -3,8 +3,10 @@ export function extractSearchDom() {
   const selector='.job-card-wrap, .job-card-wrapper, .job-card-box, .job-list-box .job-card-item';
   return [...document.querySelectorAll(selector)].filter(card=>!card.parentElement?.closest(selector)).map(card => {
     const link = card.querySelector<HTMLAnchorElement>('a[href*="/job_detail/"]');
+    const title=(card.querySelector('.job-name')??card.querySelector('.job-title'))?.cloneNode(true) as Element|undefined;
+    for(const child of title?.querySelectorAll('.salary,.job-salary')??[])child.remove();
     return {
-      url: link?.href ?? '', title: card.querySelector('.job-name, .job-title')?.textContent?.trim() ?? '',
+      url: link?.href ?? '', title: title?.textContent?.trim() ?? '',
       company: card.querySelector('.company-name, .job-card-footer .boss-name')?.textContent?.trim() ?? '', salary: card.querySelector('.salary, .job-salary')?.textContent?.trim() ?? '',
       city: card.querySelector('.job-area, .job-area-wrapper, .company-location')?.textContent?.trim() ?? '',
       tags: [...card.querySelectorAll('.tag-list li, .job-info .tag-list span')].map(tag => tag.textContent?.trim() ?? ''),
@@ -17,8 +19,11 @@ export function extractDetailDom() {
   const description=document.querySelector<HTMLElement>('.job-sec-text, .job-detail .job-description');
   const recruiter=document.querySelector('.job-boss-info .name')?.cloneNode(true) as Element|undefined;
   for(const status of recruiter?.querySelectorAll('.boss-online-tag,.boss-active-time')??[])status.remove();
+  const title=(document.querySelector('.job-banner .name h1')??document.querySelector('.job-detail .job-name')??document.querySelector('.job-detail .job-title'))?.cloneNode(true) as Element|undefined;
+  for(const child of title?.querySelectorAll('.salary,.job-salary')??[])child.remove();
   return {
-    title: document.querySelector('.job-banner .name h1, .job-detail .job-name, .job-detail .job-title')?.textContent?.trim() ?? '',
+    title: title?.textContent?.trim() ?? '',
+    salary:document.querySelector('.job-banner .salary,.job-banner .job-salary,.job-detail .salary,.job-detail .job-salary')?.textContent?.trim()??'',
     // Read the rendered description. textContent also includes hidden, changing page labels.
     // Do not strip brand words: they can be legitimate visible job requirements.
     jdText: description?.innerText.replace(/\r\n?/g,'\n').trim() ?? '',

@@ -5,7 +5,8 @@ import { createHash } from 'node:crypto';
 import mammoth from 'mammoth';
 import { getDocumentProxy, extractText } from 'unpdf';
 import { unzipSync } from 'fflate';
-import { AppError, redact, type FactCategoryName, type PendingFact } from '@jobpilot/contracts';
+import { AppError, type PendingFact } from '@jobpilot/contracts';
+import {docxBlocks,extractFacts,type ResumeBlock} from './blocks.js';
 
 export type ParsedResume = {file: string; hash: string; facts: PendingFact[]; warnings: string[]};
 // The serverless PDF.js build cannot fetch file:// assets. Read only shipped assets.
@@ -26,6 +27,7 @@ export async function parseResumeFile(path: string): Promise<ParsedResume> {
   const file = basename(path);
   const hash = createHash('sha256').update(buffer).digest('hex');
   const pages: string[] = [];
+  let structured:ResumeBlock[][]|undefined;
   const warnings: string[] = [];
   try {
     if (extension === '.docx') {
@@ -36,8 +38,8 @@ export async function parseResumeFile(path: string): Promise<ParsedResume> {
         if (expanded > 24 * 1024 * 1024) throw new AppError('RESUME_TOO_COMPLEX', 'DOCX 解压内容过大。');
         return false;
       }});
-      const result = await mammoth.extractRawText({buffer});
-      pages.push(result.value);
+      const result = await mammoth.convertToHtml({buffer},{styleMap:["p[style-name='Title'] => p.resume-title:fresh","p[style-name='Subtitle'] => p.resume-subtitle:fresh"],convertImage:mammoth.images.imgElement(async()=>({src:''}))});
+      structured=[docxBlocks(result.value)];pages.push(structured[0].map(block=>block.text).join('\n'));
       if (result.messages.length) warnings.push('DOCX 包含未能完整识别的格式，请对照原稿审核提取结果。');
     } else {
       const document = await getDocumentProxy(new Uint8Array(buffer), {maxImageSize: 16_777_216, useSystemFonts: false, useWorkerFetch: false, BinaryDataFactory: LocalPdfAssets});
@@ -52,24 +54,8 @@ export async function parseResumeFile(path: string): Promise<ParsedResume> {
     throw new AppError('PARSE_FAILED', '无法解析该简历。请确认文件未加密、未损坏，并包含可复制的文字。');
   }
   if (pages.join('').length > 100000) throw new AppError('RESUME_TOO_COMPLEX', '提取文本过长，请精简后导入。');
-  const facts: PendingFact[] = [];
-  let category: FactCategoryName = 'other';
-  pages.forEach((page, pageIndex) => {
-    const paragraphs = page.split(/\n+/).map(line => line.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').trim()).filter(Boolean);
-    paragraphs.forEach((paragraph, index) => {
-      if (/^(专业技能|技术栈|技能|skills?)[:：]?$/i.test(paragraph)) { category = 'skill'; return; }
-      if (/^(工作经历|工作经验|职业经历|experience)[:：]?$/i.test(paragraph)) { category = 'experience'; return; }
-      if (/^(项目经历|项目经验|projects?)[:：]?$/i.test(paragraph)) { category = 'project'; return; }
-      if (/^(教育经历|教育背景|学历|education)[:：]?$/i.test(paragraph)) { category = 'education'; return; }
-      if (paragraph.length < 5 || /^(电话|手机|邮箱|email|联系方式|姓名)[:：]/i.test(paragraph)) return;
-      const text = redact(paragraph);
-      if (/^(\[PHONE\]|\[EMAIL\])(?:[\s|/·]*\[(?:PHONE|EMAIL)\])*$/.test(text)) return;
-      for (let offset = 0; offset < text.length; offset += 1500) {
-        const chunk = text.slice(offset, offset + 1500);
-        facts.push({text: chunk, category, source: {file, kind: extension === '.pdf' ? 'pdf' : 'docx', ...(extension === '.pdf' ? {page: pageIndex + 1} : {}), paragraph: index + 1, quote: chunk}});
-      }
-    });
-  });
+  const result=extractFacts(structured??pages.map(page=>page.split(/\n+/).map(text=>({text}))),file,extension==='.pdf'?'pdf':'docx'),facts=result.facts;
+  warnings.push(...result.warnings);
   if (!facts.length) throw new AppError('NO_TEXT', '没有提取到可审核文字。扫描版 PDF 需要先转换为文字，或使用 DOCX。');
   if (facts.length > 300) throw new AppError('RESUME_TOO_COMPLEX', '提取条目超过 300 条，请精简简历。');
   warnings.push('以上条目是原稿文本提取结果，逐条确认后才能进入已批准事实库。');

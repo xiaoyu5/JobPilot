@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { AppError, redact, type JobRecord, type LoginState, type SearchProfileData,type CommunicationInspection,type SendVerification,type ContactKind,type ConversationSnapshot } from '@jobpilot/contracts';
-import { normalizeCard, searchUrl, type extractSearchDom, type extractDetailDom } from './dom.js';
+import { normalizeCard, searchUrl, normalizeJobText, decodeBossDigits, type extractSearchDom, type extractDetailDom } from './dom.js';
 
 const execute = promisify(execFile), wait = (ms:number) => new Promise(resolve=>setTimeout(resolve,ms));
 export function ownsChromeCommand(command:string,profilePath:string){
@@ -96,8 +96,8 @@ export class NativeChrome {
     for(let i=0;i<25;i++){signal?.throwIfAborted();await wait(400);snapshot=await this.read();if(snapshot.state==='CHALLENGE'||snapshot.state==='LOGIN_REQUIRED')this.requireLogin(snapshot);if(snapshot.state==='LOGGED_IN'&&snapshot.url===job.url&&snapshot.detail?.jdText&&snapshot.detail.title)break;}
     if(!snapshot)throw new AppError('ADAPTER_CHANGED','未读取到职位详情。');this.requireLogin(snapshot);
     const detail=snapshot.detail;if(snapshot.url!==job.url||!detail?.jdText||!detail.title)throw new AppError('ADAPTER_CHANGED','职位详情未切换到目标岗位，或页面结构不符合预期。');
-    const jdText=redact(detail.jdText).slice(0,30000);
-    return {...job,jdText,jdHash:createHash('sha256').update(jdText).digest('hex'),recruiterId:snapshot.communication?.recruiterIds.length===1?snapshot.communication.recruiterIds[0]:detail.recruiterId??job.recruiterId,alreadyContacted:job.alreadyContacted||detail.alreadyContacted,fetchedAt:new Date().toISOString(),snapshot:JSON.stringify({adapterVersion:'boss-native-m1',title:redact(detail.title),recruiterName:redact(detail.recruiterName),jdText,url:job.url})};
+    const jdText=redact(decodeBossDigits(detail.jdText)).slice(0,30000),fields=normalizeJobText(detail.title,detail.salary||job.salary);
+    return {...job,...fields,jdText,jdHash:createHash('sha256').update(jdText).digest('hex'),recruiterId:snapshot.communication?.recruiterIds.length===1?snapshot.communication.recruiterIds[0]:detail.recruiterId??job.recruiterId,alreadyContacted:job.alreadyContacted||detail.alreadyContacted,fetchedAt:new Date().toISOString(),snapshot:JSON.stringify({adapterVersion:'boss-native-m4.4',...fields,recruiterName:redact(detail.recruiterName),jdText,url:job.url})};
   });}
   async inspectCommunication(job:JobRecord,signal:AbortSignal):Promise<{job:JobRecord;inspection:CommunicationInspection}>{
     const refreshed=await this.readJob(job,signal);

@@ -145,17 +145,23 @@ export class Store {
     this.invalidate();
     return version;
   }
-  importFacts(file: string, hash: string, facts: PendingFact[]) {
-    if (this.db.prepare('SELECT id FROM resume_imports WHERE content_hash=?').get(hash)) throw new AppError('RESUME_ALREADY_IMPORTED', '该文件已导入，可在事实库逐条审核或修改。');
-    if (this.resume().facts.length + facts.length > 500) throw new AppError('FACT_LIMIT', '事实库最多保留 500 条，请先整理现有事实。');
-    if ([...this.resume().facts,...facts].reduce((n,fact)=>n+fact.text.length+fact.source.quote.length,0)>350000) throw new AppError('FACT_LIMIT', '事实文本总量过大，请先整理现有事实。');
+  importFacts(file: string, hash: string, facts: PendingFact[],options:{mode?:'merge'|'replace-imported';expectedVersion?:number}={}):ResumeState&{importSummary?:{added:number;duplicates:number;archived:number;retained:number}} {
+    const state=this.resume(),replace=options.mode==='replace-imported';
+    if(options.expectedVersion!==undefined&&state.version!==options.expectedVersion)throw new AppError('VERSION_CONFLICT','事实库已变化，请刷新后重新导入。');
+    if(replace&&options.expectedVersion===undefined)throw new AppError('VERSION_CONFLICT','替换旧简历需核对事实库版本。');
+    if (!replace&&this.db.prepare('SELECT id FROM resume_imports WHERE content_hash=?').get(hash)) throw new AppError('RESUME_ALREADY_IMPORTED', '该文件已导入，可在事实库逐条审核或修改。');
+    const archived=replace?state.facts.filter(f=>f.source.kind==='docx'||f.source.kind==='pdf'):[],retained=state.facts.filter(f=>!archived.some(old=>old.id===f.id));
+    const seen=new Set(retained.map(f=>JSON.stringify([f.category,f.text.trim()]))),unique=facts.filter(f=>{const key=JSON.stringify([f.category,f.text.trim()]);if(seen.has(key))return false;seen.add(key);return true;});
+    if (retained.length + unique.length > 500) throw new AppError('FACT_LIMIT', '事实库最多保留 500 条，请先整理现有事实。');
+    if ([...retained,...unique].reduce((n,fact)=>n+fact.text.length+fact.source.quote.length,0)>350000) throw new AppError('FACT_LIMIT', '事实文本总量过大，请先整理现有事实。');
     this.transaction(() => {
       this.bumpResume();
-      this.db.prepare('INSERT INTO resume_imports VALUES(?,?,?,?)').run(randomUUID(), file, hash, now());
+      this.db.prepare('INSERT OR IGNORE INTO resume_imports VALUES(?,?,?,?)').run(randomUUID(), file, hash, now());
+      for(const fact of archived)this.db.prepare('UPDATE resume_facts SET deleted=1,approved=0,version=version+1,updated_at=? WHERE id=?').run(now(),fact.id);
       const insert = this.db.prepare('INSERT INTO resume_facts VALUES(?,?,?,?,0,1,0,?)');
-      for (const fact of facts) insert.run(randomUUID(), fact.text, fact.category, JSON.stringify(fact.source), now());
+      for (const fact of unique) insert.run(randomUUID(), fact.text, fact.category, JSON.stringify(fact.source), now());
     });
-    return this.resume();
+    return {...this.resume(),importSummary:{added:unique.length,duplicates:facts.length-unique.length,archived:archived.length,retained:retained.length}};
   }
   addFact(input:{expectedVersion:number;text:string;category:PendingFact['category'];sourceQuote?:string}) {
     if(this.resume().version!==input.expectedVersion)throw new AppError('VERSION_CONFLICT','事实库已更新，请刷新后补充。');

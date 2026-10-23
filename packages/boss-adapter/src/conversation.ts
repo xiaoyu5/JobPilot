@@ -1,8 +1,10 @@
 import {renderedChatIdentity,renderedMessageId,renderedHistoryComplete} from './rendered-metadata.js';
 import {explicitRefusal} from '../../contracts/src/chat-rules.js';
 import {businessId as valid} from './business-id.js';
+import {startChatRoot,startChatIdentity,startChatMessages} from './start-chat.js';
 const visible=(node:Element)=>node.getClientRects().length>0;
 export function conversationRoot(){
+  const start=startChatRoot();if(start)return start;
   const excluded='.user-list,.chat-user,.chat-user-list,.contact-list';
   const primary=[...document.querySelectorAll<HTMLElement>('.chat-conversation')].filter(node=>visible(node)&&!node.closest(excluded));
   const candidates=primary.length?primary:[...document.querySelectorAll<HTMLElement>('.chat-box,.chat-record,.chat-message-list,.chat-content')].filter(node=>visible(node)&&!node.closest(excluded));
@@ -10,6 +12,7 @@ export function conversationRoot(){
   return roots.length===1?roots[0]:null;
 }
 export function visibleMessages(root:Element){
+  if(root.matches('.startchat-dialog'))return startChatMessages(root);
   const selector='.message-item,.chat-message-item,[data-message-id]';
   return [...root.querySelectorAll<HTMLElement>(selector)].filter(node=>visible(node)&&!node.parentElement?.closest(selector)).slice(-100).map(node=>{
     const outgoing=node.matches('.is-self,.sent,.mine,.item-myself,.message-mine')||!!node.querySelector('.is-self,.item-myself');
@@ -23,6 +26,7 @@ export function visibleMessages(root:Element){
 }
 export function conversationSnapshot(){
   const root=conversationRoot();if(!root)return null;
+  if(root.matches('.startchat-dialog')){const identity=startChatIdentity(root);return {id:identity?'boss-chat:'+identity.recruiterId:'',recruiterId:identity?.recruiterId??'',recruiterAliases:[],jobId:identity?.jobId??null,name:identity?.name??'',company:'',url:location.origin+location.pathname,identityBound:!!identity,historyComplete:false,messages:startChatMessages(root),capturedAt:new Date().toISOString()};}
   const ids=new Set<string>(),jobs=new Set<string>();
   for(const node of [root,...root.querySelectorAll('[data-boss-id],[data-bossid],[data-encrypt-boss-id],[data-job-id],a[href]')].filter(node=>visible(node)&&!node.closest('.message-item,.chat-message,.chat-record,.chat-message-list,.chat-message-item'))){
     for(const name of ['data-boss-id','data-bossid','data-encrypt-boss-id']){const value=valid(node.getAttribute(name));if(value)ids.add(value);}
