@@ -16,3 +16,16 @@ test('job start-chat modal binds the named target and explicit sent receipt, sen
     await page.locator('.status').evaluate(node=>node.textContent='已发送');await page.locator('.startchat-title .title').evaluate(node=>node.textContent='另一位招聘人');assert.equal((await call('contact-verify')).code,'TARGET_MISMATCH');
   }finally{await browser.close();}
 });
+
+test('asynchronous Send enablement is awaited during preparation without rewriting the editor or dispatching a click',async()=>{
+  const browser=await chromium.launch({channel:'chrome',headless:true,chromiumSandbox:true});
+  try{
+    const page=await browser.newPage();await page.route('**/*',route=>route.fulfill({contentType:'text/html; charset=utf-8',body:`<div class="nav-figure"><span class="label-text">匿名用户</span></div><section class="job-detail" data-boss-id="async_recruiter"><div class="greet-dialog"><textarea></textarea><button class="disabled">发送</button></div></section><script>window.inputs=0;window.sends=0;document.querySelector('textarea').oninput=()=>{window.inputs++;setTimeout(()=>document.querySelector('button').classList.remove('disabled'),150);};document.querySelector('button').onclick=()=>window.sends++;</script>`}));await page.goto('https://www.zhipin.com/job_detail/async_job.html');
+    const source=await readFile('dist/worker/browser-actions.js','utf8'),content='您好，我有多年客户端开发经验，曾独立完成客户端开发与上线，方便进一步交流吗？';
+    const call=async(operation:string)=>JSON.parse(await page.evaluate(source.replace('__JOBPILOT_INPUT__',JSON.stringify({operation,jobId:'async_job',recruiterId:'async_recruiter',content,intentId:'async_intent',deadline:Date.now()+5000}))) as string);
+    assert.equal((await call('prepare')).data.prepared,false);assert.equal(await page.evaluate('window.sends'),0);
+    await page.waitForFunction(()=>!document.querySelector('button')!.classList.contains('disabled'));
+    assert.equal((await call('prepare')).data.prepared,true);assert.equal(await page.evaluate('window.inputs'),1);assert.equal(await page.evaluate('window.sends'),0);
+    assert.equal((await call('submit')).data.submitted,true);await call('submit');assert.equal(await page.evaluate('window.sends'),1);
+  }finally{await browser.close();}
+});

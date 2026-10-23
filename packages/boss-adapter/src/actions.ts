@@ -62,8 +62,14 @@ export function perform(value:unknown){
     if(field.dataset.jobpilotIntent&&field.dataset.jobpilotIntent!==input.intentId){if(field.dataset.jobpilotVerified!==field.dataset.jobpilotIntent)return fail('TARGET_MISMATCH','编辑框由未核验的旧意图持有，请先人工核对。');delete field.dataset.jobpilotIntent;delete field.dataset.jobpilotSubmitted;delete field.dataset.jobpilotVerified;}
     const old=field instanceof HTMLTextAreaElement?field.value:field.textContent??'';
     if(old.trim()&&old.trim()!==input.content.trim())return fail('COMPOSER_NOT_EMPTY','编辑框已有其它内容，请先人工检查。');
-    field.focus();if(field instanceof HTMLTextAreaElement){const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')?.set;if(!setter)return fail('ADAPTER_CHANGED','不支持此编辑框。');setter.call(field,input.content);}else field.textContent=input.content;
-    field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));field.dataset.jobpilotIntent=input.intentId;return {ok:true,data:{prepared:true}};
+    if(field.dataset.jobpilotIntent!==input.intentId||old!==input.content){
+      field.focus();if(field instanceof HTMLTextAreaElement){const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')?.set;if(!setter)return fail('ADAPTER_CHANGED','不支持此编辑框。');setter.call(field,input.content);}else field.textContent=input.content;
+      field.dispatchEvent(new Event('input',{bubbles:true}));field.dispatchEvent(new Event('change',{bubbles:true}));field.dataset.jobpilotIntent=input.intentId;
+    }
+    // Framework state can enable Send asynchronously. Poll without rewriting
+    // the editor, and do not advance the durable intent to click-dispatched yet.
+    const ready=!button?.matches(':disabled,[aria-disabled="true"],.disabled,.disable');
+    return {ok:true,data:{prepared:ready,waitingForEditor:!ready}};
   }
   const actual=field instanceof HTMLTextAreaElement?field.value:field.textContent??'';
   if(field.dataset.jobpilotIntent!==input.intentId||actual!==input.content||field.dataset.jobpilotSubmitted)return fail('DRAFT_CHANGED','文案或提交状态已变化。');

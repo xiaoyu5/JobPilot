@@ -29,3 +29,26 @@ test('AI-click uncertainty and an intervening emergency stop cannot be retried t
     else{f.uncertain();f.sender.commitFollowup(plan.id,true);await f.sender.active?.promise;const record=f.sender.outbox().items[0];assert.equal(record.phase,'CLICK_DISPATCHED');assert.equal(record.confirmedUnits,1);assert.equal(record.state,'NEEDS_VERIFY');assert.equal(f.store.getRun(record.runId)!.needsVerifyCount,1);await assert.rejects(f.sender.prepareFollowup(record.id,signal()),{code:'FOLLOWUP_NOT_ELIGIBLE'});assert.equal(f.actions.filter(x=>x==='submit-ai').length,1);}
   }finally{await f.close();}}
 }));
+
+test('contact-status refresh may stale the queue but only the exact unsubmitted original AI can be independently confirmed',async()=>withModel(goodResponse,async config=>{
+  const f=await fixture(config);try{
+    const job=f.store.getJob(f.record.jobId)!;f.store.upsertJob({...job,alreadyContacted:true});
+    assert.equal(f.store.db.prepare('SELECT stale FROM greeting_drafts WHERE id=?').get(f.record.draftId)!.stale,1);
+    assert.equal(f.store.db.prepare('SELECT state FROM review_queue WHERE draft_id=?').get(f.record.draftId)!.state,'STALE');
+    f.ready();const plan=await f.sender.prepareFollowup(f.record.id,signal());assert.deepEqual(plan.items[0].blocks,[]);assert.equal(plan.items[0].content,f.record.content);assert.equal(plan.items[0].messageUnits,1);
+    assert.throws(()=>f.sender.commitFollowup(plan.id,false),{code:'GUI_AUTH_REQUIRED'});assert.deepEqual(f.actions,['default']);
+    f.sender.commitFollowup(plan.id,true);await f.sender.active?.promise;assert.equal(f.sender.outbox().items[0].confirmedUnits,2);assert.deepEqual(f.actions,['default','prepare-ai','submit-ai']);
+    // Recovery does not silently revive invalidated assessments or first-contact drafts.
+    assert.equal(f.store.db.prepare('SELECT stale FROM greeting_drafts WHERE id=?').get(f.record.draftId)!.stale,1);
+  }finally{await f.close();}
+}));
+
+test('single-AI recovery after contact-status refresh still rejects changed JD, matching rules and model configuration',async()=>withModel(goodResponse,async config=>{
+  for(const mode of ['jd','policy','model']){const f=await fixture(config);try{
+    const job=f.store.getJob(f.record.jobId)!;f.store.upsertJob({...job,alreadyContacted:true});f.ready();
+    if(mode==='jd')f.store.upsertJob({...f.store.getJob(job.id)!,jdText:job.jdText+' changed',jdHash:'changed'});
+    if(mode==='policy')f.store.setSetting('matchingPolicy',{excludedCompanies:['new exclusion']});
+    if(mode==='model')f.store.updateConfig({llm:{...f.store.config().llm!,model:'different-model'}});
+    await assert.rejects(f.sender.prepareFollowup(f.record.id,signal()),{code:'CONTEXT_CHANGED'});assert.deepEqual(f.actions,['default']);
+  }finally{await f.close();}}
+}));

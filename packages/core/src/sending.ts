@@ -70,13 +70,13 @@ export class SendingService {
     if(reserved?this.budget().usedToday>policy.maxPerDay:this.budget().usedToday>=policy.maxPerDay)add('DAILY_LIMIT','已达到每日发送意图上限，含待核验记录。');
     return blocks;
   }
-  private itemBlocks(queueId:string,mode:'review'|'auto',requireIdentity=true):SendBlock[]{
+  private itemBlocks(queueId:string,mode:'review'|'auto',requireIdentity=true,recovery=false):SendBlock[]{
     const blocks:SendBlock[]=[],add=(code:string,message:string)=>blocks.push({code,message});
     try{
-      const row=this.queue(queueId),currentJob=this.store.getJob(row.job_id);if(currentJob?.alreadyContacted)add('ALREADY_CONTACTED','该岗位已经沟通，应进入聊天流程，不重复首联。');const {job,draft,assessment}=this.matching.validateForSend(row.draft_id);
+      const row=this.queue(queueId),currentJob=this.store.getJob(row.job_id);if(currentJob?.alreadyContacted)add('ALREADY_CONTACTED','该岗位已经沟通，应进入聊天流程，不重复首联。');const {job,draft,assessment}=recovery?this.matching.validateForContactRecovery(row.draft_id):this.matching.validateForSend(row.draft_id);
       if(job.source!=='boss')add('DEMO_SEND_FORBIDDEN','匿名演示岗位不能真实发送。');
-      if((mode==='review'||draft.requiresReview)&&row.state!=='REVIEWED')add('REVIEW_REQUIRED','请先核对文案并标记本地已审核。');
-      if(!['REVIEWED','PENDING'].includes(row.state))add('DRAFT_STALE','队列或草稿已失效。');
+      if(!recovery&&(mode==='review'||draft.requiresReview)&&row.state!=='REVIEWED')add('REVIEW_REQUIRED','请先核对文案并标记本地已审核。');
+      if(!recovery&&!['REVIEWED','PENDING'].includes(row.state))add('DRAFT_STALE','队列或草稿已失效。');
       let recruiterName='';try{recruiterName=JSON.parse(job.snapshot).recruiterName??'';}catch{}
       const compact=(value:string)=>value.replace(/\s+/g,'').toLocaleLowerCase();
       const history=recruiterHistory(this.store,job.recruiterId?[job.recruiterId]:[]);
@@ -126,14 +126,14 @@ export class SendingService {
     this.store.transaction(()=>{this.store.db.prepare('UPDATE send_plans SET used=1 WHERE id=? AND used=0').run(planId);this.store.db.prepare('INSERT INTO send_authorizations VALUES(?,?,?,?,?,?,NULL)').run(id,'review',this.policy().version,context,JSON.stringify(plan.items.map(item=>({jobId:item.jobId,draftId:item.draftId,draftVersion:item.draftVersion,deliveryKind:item.deliveryKind,messageUnits:item.messageUnits}))),this.now());});
     return this.begin(plan.items.map(item=>item.queueId),'review',id,context,undefined,Object.fromEntries(plan.items.map(item=>[item.queueId,item.deliveryKind??'direct'])));
   }
-  private followupContext(record:OutboxRecord){return digest([record,this.context(),this.store.getSetting('sendStopRevision')??0,this.matching.validateForSend(record.draftId).draft]);}
+  private followupContext(record:OutboxRecord){return digest([record,this.context(),this.store.getSetting('sendStopRevision')??0,this.matching.validateForContactRecovery(record.draftId).draft]);}
   private followupCheck(record:OutboxRecord){
     if(record.state!=='NEEDS_VERIFY'||record.deliveryKind!=='default-then-ai'||!['INTENT','PREPARED'].includes(record.phase)||record.confirmedUnits>1||!['CLICK_DISPATCHED','CONFIRMED'].includes(record.defaultPhase))throw new AppError('FOLLOWUP_NOT_ELIGIBLE','只能继续有记录证明 AI 从未提交的两条首联；提交结果不明的 AI 绝不重发。');
-    const {job,draft,assessment}=this.matching.validateForSend(record.draftId);
+    const {job,draft,assessment}=this.matching.validateForContactRecovery(record.draftId);
     if(record.policyVersion!==this.policy().version||record.resumeVersion!==draft.resumeVersion||record.draftVersion!==draft.version||record.content!==draft.content||record.recruiterId!==job.recruiterId)throw new AppError('CONTEXT_CHANGED','原发送规则、事实、文案或目标已变化，不能续发。');
     if(this.statusNeedsVerify()!==1)throw new AppError('NEEDS_VERIFY','还有其他不确定发送，请先分别核验。');
     const queue=this.store.db.prepare('SELECT id FROM review_queue WHERE draft_id=? AND job_id=?').get(draft.id,job.id) as Row|undefined;if(!queue)throw new AppError('QUEUE_NOT_FOUND','原审核条目不存在。');
-    this.throwBlocks([...this.baseBlocks(true).filter(b=>!['NEEDS_VERIFY','EMERGENCY_STOPPED'].includes(b.code)),...this.itemBlocks(queue.id,'review').filter(b=>!['DUPLICATE_SEND','ALREADY_CONTACTED'].includes(b.code))]);
+    this.throwBlocks([...this.baseBlocks(true).filter(b=>!['NEEDS_VERIFY','EMERGENCY_STOPPED'].includes(b.code)),...this.itemBlocks(queue.id,'review',true,true).filter(b=>!['DUPLICATE_SEND','ALREADY_CONTACTED'].includes(b.code))]);
     return {job,draft,assessment,queue};
   }
   async prepareFollowup(id:string,signal:AbortSignal):Promise<SendPlan>{
@@ -154,7 +154,7 @@ export class SendingService {
     const promise=Promise.resolve().then(()=>this.executeFollowup(record,plan.defaultProof,stamp,stopRevision,controller.signal)).finally(()=>{clearInterval(watchdog);if(this.current?.id===record.runId)this.current=undefined;});this.current={id:record.runId,mode:'review',controller,promise};return {runId:record.runId};
   }
   private async executeFollowup(record:OutboxRecord,expectedProof:string,stamp:string,stopRevision:unknown,signal:AbortSignal){
-    let resumed=false;const check=()=>{signal.throwIfAborted();const gap=this.clock()-this.heartbeat;if(gap>30000||gap<0)throw new AppError('SYSTEM_RESUMED','检测到休眠或时钟跳变，已停止续发。');if(stamp!==this.context()||stopRevision!==(this.store.getSetting('sendStopRevision')??0))throw new AppError('CONTEXT_CHANGED','续发期间配置、事实或急停状态已变化。');this.throwBlocks(this.baseBlocks(true).filter(b=>!['NEEDS_VERIFY','EMERGENCY_STOPPED'].includes(b.code)));this.matching.validateForSend(record.draftId);};
+    let resumed=false;const check=()=>{signal.throwIfAborted();const gap=this.clock()-this.heartbeat;if(gap>30000||gap<0)throw new AppError('SYSTEM_RESUMED','检测到休眠或时钟跳变，已停止续发。');if(stamp!==this.context()||stopRevision!==(this.store.getSetting('sendStopRevision')??0))throw new AppError('CONTEXT_CHANGED','续发期间配置、事实或急停状态已变化。');this.throwBlocks(this.baseBlocks(true).filter(b=>!['NEEDS_VERIFY','EMERGENCY_STOPPED'].includes(b.code)));this.matching.validateForContactRecovery(record.draftId);};
     try{
       check();const {job}=this.followupCheck(this.record(record.id));if(!await this.health(signal))throw new AppError('LLM_UNAVAILABLE','模型服务不可用，未继续 AI。');check();
       const last=this.budget().lastActionAt;while(last!==null&&this.clock()-last<this.policy().minIntervalSeconds*1000){await delay(250,undefined,{signal});check();}

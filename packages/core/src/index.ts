@@ -227,6 +227,19 @@ export class MatchingService {
     if(!draft.statements.length||draft.statements.some(s=>!frozen.facts.some(f=>f.id===s.factId&&f.text.trim()===(s.sourceText??s.text))))throw new AppError('DRAFT_BLOCKED','最终文案引用的事实已变化。');
     return {draft,assessment:this.assessment(draft.jobId)!,job:this.job(draft.jobId)};
   }
+  validateForContactRecovery(draftId:string){
+    const draft=this.draft(draftId);if(!draft)throw new AppError('DRAFT_NOT_FOUND','草稿不存在。');
+    const intent=this.store.db.prepare("SELECT id FROM send_outbox WHERE draft_id=? AND delivery_kind='default-then-ai' AND state IN ('NEEDS_VERIFY','SENDING') AND phase IN ('INTENT','PREPARED') AND default_phase IN ('CLICK_DISPATCHED','CONFIRMED') LIMIT 1").get(draftId);
+    if(!intent)throw new AppError('FOLLOWUP_NOT_ELIGIBLE','没有可独立确认恢复的原首联意图。');
+    const job=this.job(draft.jobId),assessment=this.assessmentById(draft.assessmentId);
+    // Contact status necessarily changes after the platform greeting. Recompute
+    // every other original input; do not revive stale caches or permit new contact.
+    if(!assessment||this.context({...job,alreadyContacted:false}).key!==assessment.contextKey)throw new AppError('CONTEXT_CHANGED','原岗位、事实、模型或匹配规则已变化，不能恢复原 AI 文案。');
+    if(draft.audit.status!=='PASS'||auditGreeting(draft.content,draft.statements,this.policy()).status!=='PASS')throw new AppError('DRAFT_BLOCKED','原文案未通过当前事实与文本审计。');
+    const frozen=this.store.frozenFacts(draft.resumeVersion);
+    if(!draft.statements.length||draft.statements.some(s=>!frozen.facts.some(f=>f.id===s.factId&&f.text.trim()===(s.sourceText??s.text))))throw new AppError('DRAFT_BLOCKED','原文案引用的事实已变化。');
+    return {draft,assessment,job};
+  }
   queue(jobId: string,draftId: string) {
     this.assertNotSending(jobId);
     const draft=this.draft(draftId);
