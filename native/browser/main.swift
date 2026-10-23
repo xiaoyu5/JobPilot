@@ -18,7 +18,7 @@ func run() throws -> [String: Any] {
     let args = CommandLine.arguments
     guard args.count >= 4, let pid = pid_t(args[1]), pid > 1,
           NSRunningApplication(processIdentifier: pid)?.bundleURL?.path == "/Applications/Google Chrome.app",
-          ["ready", "read", "navigate", "scroll", "greeting-prepare", "greeting-submit", "greeting-verify", "greeting-contact-submit", "greeting-contact-verify", "greeting-chat-open"].contains(args[2]) else {
+          ["ready", "read", "navigate", "scroll", "greeting-prepare", "greeting-submit", "greeting-verify", "greeting-contact-submit", "greeting-contact-verify", "greeting-chat-open", "greeting-chat-history", "greeting-chat-contacts", "greeting-search-next", "greeting-chat-continue"].contains(args[2]) else {
         throw BrowserError(code: "INVALID_BROWSER_TARGET", message: "专用浏览器目标无效。")
     }
     if args[2] == "ready" { return ["ready": NSRunningApplication(processIdentifier: pid)?.isFinishedLaunching ?? false] }
@@ -59,7 +59,7 @@ func run() throws -> [String: Any] {
     let current = try send("getd", urlProperty).stringValue ?? ""
     guard let url = URLComponents(string: current), url.scheme == "https", url.host == "www.zhipin.com" else { return ["url": current.components(separatedBy: "?")[0], "state": "UNKNOWN", "message": "请在专用窗口中打开 BOSS 页面。"] }
     let script: String
-    if args[2] == "scroll" { script = "window.scrollBy(0, Math.max(500, window.innerHeight * 0.8)); 'ok'" }
+    if args[2] == "scroll" { script = "(() => { const roots=[...document.querySelectorAll('.job-list-box,.job-list-wrapper,.search-job-result')].filter(n=>n.getClientRects().length&&n.scrollHeight>n.clientHeight); const root=roots.find(n=>!roots.some(o=>o!==n&&n.contains(o))); if(root){root.scrollBy(0,Math.max(500,root.clientHeight*.8));root.dispatchEvent(new Event('scroll'));}else window.scrollBy(0,Math.max(500,window.innerHeight*.8));return 'ok';})()" }
     else {
         let data = try Data(contentsOf: URL(fileURLWithPath: args[3]))
         guard data.count < 256 * 1024, let source = String(data: data, encoding: .utf8) else { throw BrowserError(code: "BROWSER_RESOURCE_INVALID", message: "浏览器读取资源无效。") }

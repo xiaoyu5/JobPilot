@@ -13,7 +13,7 @@ import type {Assessment,Draft} from '@jobpilot/contracts';
 
 // Tauri intentionally rejects a macOS executable path containing symlinks.
 // /tmp -> /private/tmp must be canonicalized before launching the copied App.
-const {productName}=JSON.parse(await readFile('apps/desktop/src-tauri/tauri.conf.json','utf8'));
+const {productName,version}=JSON.parse(await readFile('apps/desktop/src-tauri/tauri.conf.json','utf8'));
 const bundle = await realpath(resolve(process.argv[2] ?? `apps/desktop/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/${productName}.app`));
 await withModel(goodResponse,async config=>{
 const dir = await mkdtemp('/tmp/jp-bundle-');
@@ -103,7 +103,7 @@ try {
   client = new Client({name: 'jobpilot-bundle-check', version: '0.0.1'});
   await client.connect(new StdioClientTransport({command: node, args: [script, '--mode', 'mcp', '--data-dir', dir], env: {PATH: '/usr/bin:/bin'}}));
   await client.ping();
-  assert.equal(client.getServerVersion()?.version,'0.4.4');
+  assert.equal(client.getServerVersion()?.version,version);
   const tools=await client.listTools();assert.equal(tools.tools.length,10);assert(!tools.tools.some(tool=>/commit|authorize|reset|restore|export/.test(tool.name)));
   const result = await client.callTool({name: 'jobpilot.status', arguments: {}});
   assert.equal(JSON.parse((result.content[0] as {text: string}).text).data.pid, first.pid);

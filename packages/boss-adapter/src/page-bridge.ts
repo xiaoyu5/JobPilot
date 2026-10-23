@@ -10,7 +10,6 @@ const key='__JobPilotReadonlyBridge_v1__',own=window as unknown as Record<string
 if(location.origin!=='https://www.zhipin.com')throw new Error('Only BOSS is supported');
 own[key]?.stop();
 const owned=new Map<Element,Map<string,string|null>>();
-const knownRecruiters=new Set<string>();
 let indicator:HTMLElement|undefined;
 function set(node:Element,name:string,value:string){let attrs=owned.get(node);if(!attrs){attrs=new Map();owned.set(node,attrs);}if(!attrs.has(name)){if(node.hasAttribute(name))return;attrs.set(name,null);}node.setAttribute(name,value);}
 function restore(){for(const [node,attrs] of owned)for(const [name,value] of attrs){if(value===null)node.removeAttribute(name);else node.setAttribute(name,value);}owned.clear();}
@@ -55,7 +54,7 @@ function publishKnownContacts(){
       const source=instance?.$props?.source;if(!source||typeof source!=='object'||typeof source.name!=='string'||source.name.trim()!==name)continue;
       const id=recruiterIdentity(source)?.recruiterId;if(id)ids.add(id);
     }
-    if(ids.size!==1)continue;const id=[...ids][0];if(!knownRecruiters.has(id))continue;
+    if(ids.size!==1)continue;const id=[...ids][0];
     set(entry,'data-boss-id',id);set(entry,'data-jobpilot-chat-target-name',name);
   }
 }
@@ -88,8 +87,8 @@ function refresh(){
   set(root,'data-jobpilot-identity-count-'+ids.size,'');
   if(!indicator||indicator.parentElement!==root){indicator?.remove();indicator=document.createElement('aside');indicator.className='jobpilot-readonly-indicator';indicator.setAttribute('role','status');indicator.style.cssText='background:#e0f2fe;color:#164e63;padding:6px 12px;font:12px system-ui;pointer-events:none';root.prepend(indicator);}
   const label=id?'JobPilot 只读连接已启用 · 招聘人已绑定':'JobPilot 只读连接已启用 · 招聘人标识待识别';if(indicator.textContent!==label)indicator.textContent=label;
+  publishKnownContacts();
   if(!id)return;
-  if(knownRecruiters.size<100)knownRecruiters.add(id.recruiterId);
   set(root,'data-boss-id',id.recruiterId);set(root,'data-jobpilot-recruiter-aliases',JSON.stringify(id.aliases));if(id.jobId)set(root,'data-job-id',id.jobId);
   const record=root.querySelector('.chat-record,.chat-message-list');if(record&&(renderedHistoryComplete(record)||recordHistoryComplete(record,name,id.recruiterId)))set(record,'data-history-complete','true');
   publishKnownContacts();

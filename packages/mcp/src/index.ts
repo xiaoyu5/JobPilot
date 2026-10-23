@@ -7,7 +7,7 @@ type McpAction = 'status' | 'run.start' | 'jobs.list' | 'run.get' | 'run.pause' 
 
 export function startMcp(call: (action: McpAction, payload?: unknown) => Promise<Envelope>) {
   return serveStdio(() => {
-    const server = new McpServer({name: 'jobpilot', version: '0.4.4'});
+    const server = new McpServer({name: 'jobpilot', version: '0.5.0'});
     const invoke = async (action: McpAction, payload?: unknown) => {
       let result: Envelope;
       try { result = await call(action, payload); }
@@ -26,7 +26,7 @@ export function startMcp(call: (action: McpAction, payload?: unknown) => Promise
       description: 'preview 只读采集；Auto 仅在 GUI 已为当前会话授权后，按已保存限制处理真实队列。MCP 不能授予授权。',
       inputSchema: StartRun,
     }, payload => invoke('run.start', payload));
-    server.registerTool('jobpilot.search', {description: '按已保存方案采集职位与 JD；只读，不发送消息。', inputSchema: z.object({searchProfileId: z.literal('primary'), maxJobs: z.number().int().min(1).max(50).default(20)}).strict()}, args => invoke('run.start', {profileId: args.searchProfileId, maxJobs: args.maxJobs, mode: 'preview'}));
+    server.registerTool('jobpilot.search', {description: '按已保存方案采集职位与 JD；只读，不发送消息。', inputSchema: z.object({searchProfileId: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).default('primary'), maxJobs: z.number().int().min(1).max(50).default(20)}).strict()}, args => invoke('run.start', {profileId: args.searchProfileId, maxJobs: args.maxJobs, mode: 'preview'}));
     server.registerTool('jobpilot.list_jobs', {description: '分页读取本机岗位池；演示数据有独立来源标记。', inputSchema: JobListQuery, annotations: {readOnlyHint: true}}, args => invoke('jobs.list', args));
     server.registerTool('jobpilot.analyze', {description:'使用已冻结的已确认事实匹配岗位；向用户配置的模型端点发送必要 JD 和事实。复用缓存，不发送消息。',inputSchema:AnalyzeInput},args=>invoke('analysis.analyze',args));
     server.registerTool('jobpilot.draft_greeting', {description:'为当前匹配生成有事实依据的中文草稿并审计；不会发送。',inputSchema:DraftInput},args=>invoke('draft.generate',args));

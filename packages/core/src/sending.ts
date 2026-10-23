@@ -75,7 +75,7 @@ export class SendingService {
     try{
       const row=this.queue(queueId),currentJob=this.store.getJob(row.job_id);if(currentJob?.alreadyContacted)add('ALREADY_CONTACTED','该岗位已经沟通，应进入聊天流程，不重复首联。');const {job,draft,assessment}=this.matching.validateForSend(row.draft_id);
       if(job.source!=='boss')add('DEMO_SEND_FORBIDDEN','匿名演示岗位不能真实发送。');
-      if(mode==='review'&&row.state!=='REVIEWED')add('REVIEW_REQUIRED','请先核对文案并标记本地已审核。');
+      if((mode==='review'||draft.requiresReview)&&row.state!=='REVIEWED')add('REVIEW_REQUIRED','请先核对文案并标记本地已审核。');
       if(!['REVIEWED','PENDING'].includes(row.state))add('DRAFT_STALE','队列或草稿已失效。');
       let recruiterName='';try{recruiterName=JSON.parse(job.snapshot).recruiterName??'';}catch{}
       const compact=(value:string)=>value.replace(/\s+/g,'').toLocaleLowerCase();
@@ -167,11 +167,12 @@ export class SendingService {
       if(result.state!=='CONFIRMED')throw new AppError('NEEDS_VERIFY',result.message);this.confirm(record.id,result.messageId??'visible-confirmation');this.store.finishRun(record.runId,'COMPLETED');this.store.db.prepare('UPDATE runs SET checkpoint_json=NULL WHERE id=?').run(record.runId);this.store.event(record.runId,'SENT_CONFIRMED','默认招呼及重新确认的 AI 文案均有页面回执；原意图完成。');
     }catch(error){if(resumed){this.store.db.prepare("UPDATE send_outbox SET state='NEEDS_VERIFY',verify_detail=?,version=version+1 WHERE id=? AND state='SENDING'").run('AI 续发已停止；请核验，禁止自动重发。',record.id);this.store.db.prepare('UPDATE runs SET needs_verify_count=needs_verify_count+1 WHERE id=?').run(record.runId);}this.store.finishRun(record.runId,'NEEDS_HUMAN','NEEDS_VERIFY');this.store.event(record.runId,'NEEDS_VERIFY',error instanceof AppError?error.message:'AI 续发停止，保留原意图及去重锁。');}
   }
-  startAuto(){
+  async waitForRun(id:string){if(this.current?.id===id)await this.current.promise;}
+  startAuto(queueIds?:string[]){
     if(!this.isAutoAuthorized())throw new AppError('CONSENT_REQUIRED','Auto 尚未在界面启用，MCP 无法代为授权。');
     this.throwBlocks(this.baseBlocks());
     const rows=this.store.db.prepare("SELECT id FROM review_queue WHERE state IN ('PENDING','REVIEWED') ORDER BY created_at,id").all() as Row[];
-    const ids=rows.filter(row=>!this.itemBlocks(row.id,'auto').length).slice(0,this.policy().maxPerRun).map(row=>row.id);
+    const ids=rows.filter(row=>(!queueIds||queueIds.includes(row.id))&&!this.itemBlocks(row.id,'auto').length).slice(0,this.policy().maxPerRun).map(row=>row.id);
     if(!ids.length)throw new AppError('NO_ELIGIBLE_JOBS','队列中没有满足全部条件的真实岗位。');
     return this.begin(ids,'auto',this.autoAuthorization!.id,this.autoAuthorization!.context);
   }

@@ -10,6 +10,7 @@ import {recruiterHistory} from './recruiter-identity.js';
 type Row=Record<string,any>;
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export interface ChatTransport{
+  discoverConversations?(signal:AbortSignal):Promise<{recruiterId:string;name:string;company:string}[]>;
   readConversation(signal:AbortSignal,target?:ConversationSnapshot):Promise<ConversationSnapshot>;
   prepareReply(chat:ConversationSnapshot,content:string,inboundId:string,signal:AbortSignal,intentId:string):Promise<void>;
   submitReply(chat:ConversationSnapshot,content:string,inboundId:string,signal:AbortSignal,intentId:string):Promise<void>;
@@ -22,11 +23,14 @@ export function classifyConversation(chat:ConversationSnapshot):{state:ChatState
   if(!chat.identityBound||!chat.recruiterId)return {state:'REVIEW',reason:'会话身份无法可靠绑定。',inboundId:null};
   if(!last||last.direction==='outgoing')return {state:'WAITING',reason:'等待对方回复，不自动追问或重复招呼。',inboundId:null};
   if(!last.id||!last.confirmed||!chat.historyComplete)return {state:'REVIEW',reason:'历史未完整加载或最新消息标识不可靠，先人工核对。',inboundId:last.id||null};
-  if(needsHumanReply(last.text))return {state:'REVIEW',reason:'涉及薪资、时间、联系方式、附件或其它需人工决定的内容。',inboundId:last.id};
+  const pending=messages.slice(messages.findLastIndex(message=>message.direction==='outgoing')+1);
+  if(pending.filter(message=>isReplyQuestion(message.text)).length>1)return {state:'REVIEW',reason:'对方连续提出多个尚未回答的问题，需人工核对完整语境。',inboundId:last.id};
+  if(pending.some(message=>needsHumanReply(message.text)))return {state:'REVIEW',reason:'涉及薪资、时间、联系方式、附件或其它需人工决定的内容。',inboundId:last.id};
   if(!isReplyQuestion(last.text))return /^(收到|好的|好|谢谢|嗯|ok)[!！。\s]*$/i.test(last.text.trim())?{state:'WAITING',reason:'最新消息无需自动回复。',inboundId:last.id}:{state:'REVIEW',reason:'最新消息意图不明确，不将其当作自动回复邀请。',inboundId:last.id};
   return {state:'REPLY_NEEDED',reason:'有新的对方提问，可依据已确认事实准备回复。',inboundId:last.id};
 }
 export class ChattingService{
+  private watchTimer:ReturnType<typeof setInterval>|undefined;private watchError:string|null=null;private scanCursor=0;
   private beat=0;private working=false;private controller:AbortController|undefined;private authorization:{id:string;ids:string[];context:string}|undefined;private timer:ReturnType<typeof setInterval>|undefined;private task:Promise<unknown>|undefined;
   constructor(readonly store:Store,readonly sending:SendingService,readonly transport:ChatTransport,readonly configuration:()=>LlmConfiguration,private externalBusy:()=>boolean=()=>false,private clock=()=>Date.now(),private health:(signal:AbortSignal)=>Promise<boolean>=async signal=>(await testConnection(configuration(),signal)).healthy){}
   get busy(){return this.working;}
@@ -39,7 +43,7 @@ export class ChattingService{
   private view(row:Row):ChatConversation{return {id:row.id,recruiterId:row.recruiter_id,name:row.name,company:row.company,state:row.state,reason:row.reason,version:row.version,lastInboundId:row.last_inbound_id,updatedAt:row.updated_at};}
   private row(id:string){const row=this.store.db.prepare('SELECT * FROM chat_conversations WHERE id=?').get(id) as Row|undefined;if(!row)throw new AppError('CHAT_NOT_FOUND','请先读取当前已有会话。');return row;}
   private snapshot(id:string):ConversationSnapshot{return JSON.parse(this.row(id).snapshot_json);}
-  list(){if(this.authorization?.context!==this.context())this.disable();return {items:(this.store.db.prepare('SELECT * FROM chat_conversations ORDER BY updated_at DESC LIMIT 100').all() as Row[]).map(row=>this.view(row)),lastError:this.store.getSetting('chatLastError'),autoEnabled:!!this.authorization,authorizedIds:this.authorization?.ids??[],busy:this.busy};}
+  list(){if(this.authorization?.context!==this.context())this.disable();return {watchEnabled:!!this.watchTimer,watchError:this.watchError,items:(this.store.db.prepare('SELECT * FROM chat_conversations ORDER BY updated_at DESC LIMIT 100').all() as Row[]).map(row=>this.view(row)),lastError:this.store.getSetting('chatLastError'),autoEnabled:!!this.authorization,authorizedIds:this.authorization?.ids??[],busy:this.busy};}
   private ingest(input:ConversationSnapshot){
     if(!input.identityBound||!input.id||!input.recruiterId)throw new AppError('CHAT_IDENTITY_UNKNOWN','无法可靠绑定会话，未导入或回复。');
     const chat={...input,historyComplete:input.historyComplete&&input.messages.length<=100,name:redact(input.name),company:redact(input.company),messages:input.messages.slice(-100).map(message=>({...message,text:redact(message.text).slice(0,4000)}))};
@@ -50,6 +54,24 @@ export class ChattingService{
     this.store.db.prepare(`INSERT INTO chat_conversations(id,recruiter_id,name,company,state,reason,snapshot_json,last_inbound_id,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,company=excluded.company,state=excluded.state,reason=excluded.reason,snapshot_json=excluded.snapshot_json,last_inbound_id=excluded.last_inbound_id,version=version+1,updated_at=excluded.updated_at`).run(chat.id,chat.recruiterId,chat.name,chat.company,classified.state,classified.reason,JSON.stringify(chat),classified.inboundId,this.now());return this.view(this.row(chat.id));
   }
   scan(id?:string){this.readConsent();const target=id?this.snapshot(id):undefined;return this.exclusive(async signal=>{const current=await this.transport.readConversation(signal,target);if(target&&(current.id!==target.id||current.recruiterId!==target.recruiterId))throw new AppError('TARGET_MISMATCH','切换后会话身份不符，未导入。');return this.ingest(current);});}
+  scanInbox(){this.readConsent();return this.exclusive(async signal=>{
+    if(!this.transport.discoverConversations)throw new AppError('ADAPTER_CHANGED','当前适配器不支持联系人扫描。');
+    const targets=await this.transport.discoverConversations(signal),items:ChatConversation[]=[];
+    if(!targets.length)throw new AppError('CHAT_IDENTITY_UNKNOWN','未发现可靠联系人，请在消息页连接新版只读扩展。');
+    const known=new Set<string>();
+    const batch=targets.slice(this.scanCursor,this.scanCursor+10);this.scanCursor=this.scanCursor+10>=targets.length?0:this.scanCursor+10;
+    for(const target of batch){
+      this.guard(signal);if(known.has(target.recruiterId))continue;known.add(target.recruiterId);
+      const wanted:ConversationSnapshot={...target,id:'boss-chat:'+target.recruiterId,jobId:null,url:'https://www.zhipin.com/web/geek/chat',identityBound:true,historyComplete:false,messages:[],capturedAt:this.now()};
+      const fresh=await this.transport.readConversation(signal,wanted);
+      if(fresh.id!==wanted.id||fresh.recruiterId!==wanted.recruiterId||fresh.name!==target.name)throw new AppError('TARGET_MISMATCH','联系人切换后身份不符，扫描停止。');
+      items.push(this.ingest(fresh));
+    }
+    this.watchError=null;return {items,scanned:items.length,limit:100};
+  });}
+  setWatch(enabled:boolean,gui:boolean){this.gui(gui);if(this.watchTimer)clearInterval(this.watchTimer);this.watchTimer=undefined;if(!enabled)return {enabled:false};this.readConsent();this.watchError=null;
+    this.watchTimer=setInterval(()=>{if(this.busy||this.externalBusy())return;void this.scanInbox().catch(error=>{if(!this.watchTimer)return;this.watchError=error instanceof AppError?error.message:'消息扫描失败，请重新连接后启用。';if(this.watchTimer)clearInterval(this.watchTimer);this.watchTimer=undefined;});},30000);this.watchTimer.unref();return {enabled:true};
+  }
   private stamp(chat:ConversationSnapshot){return hash([chat.id,chat.recruiterId,chat.recruiterAliases,chat.jobId,chat.historyComplete,chat.messages.map(m=>[m.id,m.direction,m.text,m.confirmed]),this.context()]);}
   private async prepareInternal(id:string,signal:AbortSignal):Promise<ChatReplyPlan>{
     this.readConsent();const target=this.snapshot(id),raw=await this.transport.readConversation(signal,target);if(raw.recruiterId!==target.recruiterId||raw.id!==target.id)throw new AppError('TARGET_MISMATCH','当前不是所选会话。');
@@ -102,6 +124,6 @@ export class ChattingService{
   async tick(){if(!this.authorization||this.busy||this.externalBusy())return {processed:0};const ids=this.authorization.ids.filter(id=>this.row(id).state!=='REJECTED');if(!ids.length){this.disable();return {processed:0};}return this.exclusive(async signal=>{let sent=0,runId:string|undefined;try{for(const id of ids){if(!this.isAuthorized(id))break;if(this.row(id).state==='REJECTED')continue;this.sending.checkGate();if(sent>=this.sending.policy().maxPerRun)break;const fresh=await this.transport.readConversation(signal,this.snapshot(id));if(fresh.id!==id)throw new AppError('TARGET_MISMATCH','切换会话失败。');if(this.ingest(fresh).state!=='REPLY_NEEDED')continue;let plan:ChatReplyPlan;try{plan=await this.prepareInternal(id,signal);}catch(error){if(error instanceof AppError&&['CHAT_NOT_REPLYABLE','CHAT_REVIEW_REQUIRED','CONVERSATION_REJECTED','DRAFT_BLOCKED'].includes(error.code))continue;throw error;}if(!runId){if(this.sending.budget().runsToday>=this.sending.policy().maxRunsPerDay)throw new AppError('DAILY_RUN_LIMIT','今日轮次已用完。');const run=this.store.createRun('boss');runId=run.id;this.store.db.prepare("UPDATE runs SET kind='chat',execution_mode='auto',state='ANALYZING' WHERE id=?").run(runId);}const result=await this.commitInternal(plan.id,signal,'auto',runId);if(result.sent)sent++;}if(this.authorization?.ids.every(id=>this.row(id).state==='REJECTED'))this.disable();if(runId)this.store.finishRun(runId,'COMPLETED');return {processed:sent};}catch(error){this.store.setSetting('chatLastError',{code:error instanceof AppError?error.code:'CHAT_FAILED',message:error instanceof AppError?error.message:'自动回复已停止，请检查会话。'});this.disable();if(runId&&this.store.getRun(runId)?.state!=='NEEDS_HUMAN')this.store.finishRun(runId,'NEEDS_HUMAN',error instanceof AppError?error.code:'CHAT_FAILED');throw error;}});}
   outbox(){return {items:this.store.db.prepare('SELECT id,run_id runId,conversation_id conversationId,content,state,detail,version,created_at createdAt FROM chat_outbox ORDER BY created_at DESC LIMIT 100').all()};}
   resolve(id:string,version:number,result:'sent'|'not-sent',gui:boolean){this.gui(gui);if(this.busy)throw new AppError('RUN_ACTIVE','请先停止自动回复。');const row=this.store.db.prepare('SELECT * FROM chat_outbox WHERE id=?').get(id) as Row|undefined;if(!row||row.state!=='NEEDS_VERIFY'||row.version!==version)throw new AppError('VERSION_CONFLICT','回复记录已变化。');this.store.transaction(()=>{this.store.db.prepare('UPDATE chat_outbox SET state=?,detail=?,version=version+1 WHERE id=?').run(result==='sent'?'MANUALLY_CONFIRMED':'NOT_SENT',result==='sent'?'人工确认已发送。':'人工确认未发并跳过；消息去重锁保留。',id);this.store.db.prepare('UPDATE runs SET sent_count=sent_count+?,needs_verify_count=max(0,needs_verify_count-1),processed_count=processed_count+1 WHERE id=?').run(result==='sent'?1:0,row.run_id);});return {resolved:true};}
-  stop(){this.disable();this.controller?.abort();}
+  stop(){if(this.watchTimer)clearInterval(this.watchTimer);this.watchTimer=undefined;this.disable();this.controller?.abort();}
   async close(){this.stop();await this.task?.catch(()=>{});}
 }

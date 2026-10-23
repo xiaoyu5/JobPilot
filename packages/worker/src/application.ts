@@ -1,3 +1,4 @@
+import {WorkflowService,WorkflowInput,ScheduleInput,type WorkflowBrowser} from '../../core/src/workflow.js';
 import { z } from 'zod';
 import {FactAdd} from '@jobpilot/contracts';
 import { AppError, AnalyzeInput, ConfigUpdate, DraftInput, DraftUpdate, DryRunInput, FactUpdate, JobListQuery, QueueInput, QueueList, QueueReview, ResumeImport, SearchProfile, StartRun,SendSelection,SendCommit,SendResolve, type Request, type JobSource, type JobRecord, type WorkerStatus, type LlmConfiguration } from '@jobpilot/contracts';
@@ -19,6 +20,7 @@ import {NotificationService} from './notifications.js';
 const Identifier = z.object({id: z.string().min(1).max(200)}).strict();
 const StartPreview = StartRun.extend({maxJobs: z.number().int().min(1).max(50).optional()}).strict();
 export class Application {
+  readonly workflow:WorkflowService;
   readonly store: Store;
   readonly browser: BrowserProbe;
   readonly matching: MatchingService;
@@ -34,7 +36,7 @@ export class Application {
   private llmBusy = false;
   private importing = false;
   private started = Date.now();
-  constructor(dataDir: string,options:{chatTransport?:ChatTransport;transport?:SendTransport;health?:(signal:AbortSignal)=>Promise<boolean>;clock?:()=>number;notifications?:{fetch?:typeof fetch;intervalMs?:number;timeoutMs?:number}}={}) {
+  constructor(dataDir: string,options:{workflowBrowser?:WorkflowBrowser;chatTransport?:ChatTransport;transport?:SendTransport;health?:(signal:AbortSignal)=>Promise<boolean>;clock?:()=>number;notifications?:{fetch?:typeof fetch;intervalMs?:number;timeoutMs?:number}}={}) {
     this.store = new Store(dataDir); this.browser = new BrowserProbe(dataDir);
     // Repair cached BOSS display fields as well as future reads. Delivery evidence is untouched.
     for(let offset=0;;offset+=100){const page=this.store.listJobs({source:'boss',limit:100,offset});for(const job of page.items){try{const fields=normalizeJobText(job.title,job.salary);if(fields.title!==job.title||fields.salary!==job.salary)this.store.upsertJob({...job,...fields});}catch{ /* Unknown encoding stays blocked until a real page refresh. */ }}if(offset+100>=page.total)break;}
@@ -42,9 +44,10 @@ export class Application {
     this.environmentPath=this.store.config().llmEnvPath??join(dataDir,'.env');
     if(this.store.config().llmEnvPath||existsSync(this.environmentPath))try{this.useEnvironment(readEnvironment(this.environmentPath));}catch(error){this.environmentError=error instanceof AppError?error.message:'环境配置读取失败，请在设置重新选择文件。';}
     this.sending=new SendingService(this.store,this.matching,options.transport??this.browser,options.health??(signal=>this.llm(async()=>{const result=await testConnection(this.llmConfiguration(),signal);this.store.setSetting('llmHealth',{healthy:result.healthy,checkedAt:new Date().toISOString()});return result.healthy;},true)),options.clock);
-    this.chatting=new ChattingService(this.store,this.sending,options.chatTransport??this.browser,()=>this.llmConfiguration(),()=>!!this.active||this.llmBusy||!!this.sending.active||this.dataBusy,options.clock,options.health);
+    this.chatting=new ChattingService(this.store,this.sending,options.chatTransport??this.browser,()=>this.llmConfiguration(),()=>!!this.active||this.llmBusy||!!this.sending.active||this.dataBusy||!!this.workflow?.busy,options.clock,options.health);
     this.data=new DataService(this.store,dataDir,()=>this.status(),options.clock);
     this.notifications=new NotificationService(this.store,()=>this.environmentPath,()=>this.dataBusy||existsSync(join(dataDir,'data-operation.json')),()=>this.chatting.list().authorizedIds,{...options.notifications,clock:options.clock});
+    this.workflow=new WorkflowService(this.store,this.matching,this.sending,options.workflowBrowser??this.browser,()=>!!this.active||this.llmBusy||this.importing||this.dataBusy||this.chatting.busy||!!this.sending.active,options.clock);
     this.notifications.start();
   }
   private useEnvironment(value:ReturnType<typeof readEnvironment>,explicit=false) {
@@ -69,19 +72,20 @@ export class Application {
   }
   private gui(authorized:boolean){if(!authorized)throw new AppError('GUI_AUTH_REQUIRED','数据导出、恢复、清理和结果标记需要在应用界面操作。');}
   private async maintain<T>(authorized:boolean,action:()=>Promise<T>|T){
-    this.gui(authorized);if(this.dataBusy||this.active||this.llmBusy||this.importing||this.sending.active||this.chatting.busy||this.sending.status().autoModeConsent||this.chatting.list().autoEnabled)throw new AppError('RUN_ACTIVE','请先停止任务和两种 Auto，再操作本机数据。');
+    this.gui(authorized);if(this.workflow.busy||this.dataBusy||this.active||this.llmBusy||this.importing||this.sending.active||this.chatting.busy||this.sending.status().autoModeConsent||this.chatting.list().autoEnabled)throw new AppError('RUN_ACTIVE','请先停止任务和两种 Auto，再操作本机数据。');
     this.dataBusy=true;try{return await action();}finally{this.dataBusy=false;}
   }
   private consent() { if (!this.store.config().bossReadOnlyConsent) throw new AppError('CONSENT_REQUIRED', '请先在设置中明确授权 BOSS 只读访问。'); }
-  private start(source: JobSource, maxJobs?: number) {
+  private start(source: JobSource, maxJobs?: number,profileId='primary') {
     if (this.active || this.llmBusy||this.sending.active||this.chatting?.busy) throw new AppError('RUN_ACTIVE', '已有任务运行中。');
     if (source === 'boss') this.consent();
-    const profile = this.store.getSearch()!;
+    const profile = this.store.getSearch(profileId);if(!profile)throw new AppError('PROFILE_NOT_FOUND','搜索方案不存在。');
     if (maxJobs) profile.maxJobs = Math.min(maxJobs, profile.maxJobs);
     const run = this.store.createRun(source);
     const controller = new AbortController();
     const promise = Promise.resolve().then(async () => {
-      this.store.event(run.id, 'RUN_STARTED', source === 'demo' ? '载入 20 条匿名演示岗位；不连接 BOSS。' : '开始只读采集，本次任务无发送能力。');
+      this.store.db.prepare('UPDATE runs SET profile_id=? WHERE id=?').run(profile.id,run.id);
+        this.store.event(run.id, 'RUN_STARTED', source === 'demo' ? '载入 20 条匿名演示岗位；不连接 BOSS。' : '开始只读采集，本次任务无发送能力。');
       try {
         if (source === 'demo') {
           for (const job of demoJobs()) { controller.signal.throwIfAborted(); this.store.upsertJob(job); this.store.incrementRun(run.id); }
@@ -139,12 +143,13 @@ export class Application {
     this.active={id:run.id,controller,promise};return {runId:run.id};
   }
   async dispatch(action: Request['action'], payload: unknown, signal: AbortSignal,guiAuthorized=false): Promise<unknown> {
-    const readOnly=['status','config.get','dashboard.get','jobs.list','jobs.get','resume.list','search.get','run.list','run.get','queue.list','send.status','send.outbox','chat.list','chat.outbox','outcomes.list','stats.get','data.status','notifications.status'];
+    const readOnly=['status','config.get','dashboard.get','jobs.list','jobs.get','resume.list','search.get','search.list','workflow.schedule.get','run.list','run.get','queue.list','send.status','send.outbox','chat.list','chat.outbox','outcomes.list','stats.get','data.status','notifications.status'];
+    if(this.workflow.busy&&!readOnly.includes(action)&&!['run.pause','send.stop'].includes(action))throw new AppError('RUN_ACTIVE','串联任务正在运行，请先暂停。');
     if(this.dataBusy&&!readOnly.includes(action))throw new AppError('RUN_ACTIVE','本机数据操作正在进行，请稍后重试。');
     if(!readOnly.includes(action)&&action!=='data.operation.cancel'&&action!=='send.stop'&&await this.data.pending())throw new AppError('RESTART_REQUIRED','已确认的数据操作等待重启；可在设置取消。');
     if(this.dataBusy&&!readOnly.includes(action))throw new AppError('RUN_ACTIVE','本机数据操作正在进行，请稍后重试。');
     if(this.chatting.busy&&!readOnly.includes(action)&&!['send.stop','run.pause','chat.auto.set'].includes(action))throw new AppError('RUN_ACTIVE','聊天任务持有浏览器与模型，请先停止。');
-    if(this.sending.active&&['chat.open','chat.scan','chat.prepare','chat.commit','chat.auto.tick','browser.open','browser.close','boss.login.open','boss.login.status','jobs.read','boss.communication.inspect','send.prepare','llm.env.load','llm.env.save'].includes(action))throw new AppError('RUN_ACTIVE','发送任务持有浏览器，请先暂停。');
+    if(this.sending.active&&['chat.open','chat.scan','chat.inbox.scan','chat.prepare','chat.commit','chat.auto.tick','browser.open','browser.close','boss.login.open','boss.login.status','jobs.read','boss.communication.inspect','send.prepare','llm.env.load','llm.env.save'].includes(action))throw new AppError('RUN_ACTIVE','发送任务持有浏览器，请先暂停。');
     switch (action) {
       case 'notifications.status': return this.notifications.status();
       case 'notifications.save': return this.notifications.save(payload,guiAuthorized);
@@ -166,7 +171,9 @@ export class Application {
       case 'status': return this.status();
       case 'dashboard.get': return this.store.dashboard();
       case 'config.get': return this.store.config();
-      case 'chat.open': this.consent();return this.browser.openChats();
+      case 'chat.open': {this.consent();if(payload===undefined||payload===null)return this.browser.openChats();const job=this.store.getJob(Identifier.parse(payload).id);if(!job)throw new AppError('JOB_NOT_FOUND','岗位不存在。');return this.browser.openExistingChat(job,signal);}
+      case 'chat.inbox.scan': this.consent();return this.chatting.scanInbox();
+      case 'chat.watch.set': return this.chatting.setWatch(z.object({enabled:z.boolean()}).strict().parse(payload).enabled,guiAuthorized);
       case 'chat.list': return this.chatting.list();
       case 'chat.scan': this.consent();return this.chatting.scan(payload===undefined?undefined:Identifier.parse(payload).id);
       case 'chat.prepare': return this.chatting.prepare(Identifier.parse(payload).id);
@@ -185,7 +192,7 @@ export class Application {
       case 'send.outbox': {const input=QueueList.parse(payload??{});return this.sending.outbox(input.limit,input.offset);}
       case 'send.verify': return this.sending.verify(Identifier.parse(payload).id,signal);
       case 'send.resolve': {const input=SendResolve.parse(payload);return this.sending.resolve(input.id,input.expectedVersion,input.result,guiAuthorized);}
-      case 'send.stop': this.active?.controller.abort();this.chatting.stop();return this.sending.stop();
+      case 'send.stop': this.workflow.stop();this.active?.controller.abort();this.chatting.stop();return this.sending.stop();
       case 'send.reset': return this.sending.reset(guiAuthorized);
       case 'send.resume': return this.sending.resume(z.object({id:z.string().uuid(),confirmed:z.literal(true)}).strict().parse(payload).id,guiAuthorized);
       case 'send.cancel': return this.sending.cancel(z.object({id:z.string().uuid(),confirmed:z.literal(true)}).strict().parse(payload).id,guiAuthorized);
@@ -201,7 +208,7 @@ export class Application {
       case 'draft.update': {const input=DraftUpdate.parse(payload);return this.matching.updateDraft(input.id,input.expectedVersion,input.content);}
       case 'queue.list': {const input=QueueList.parse(payload??{});return {items:this.matching.listQueue(input.limit,input.offset),total:this.matching.queueCount()};}
       case 'queue.add': {const input=QueueInput.parse(payload);return this.matching.queue(input.jobId,input.draftId);}
-      case 'queue.review': {const input=QueueReview.parse(payload);return this.matching.review(input.id,input.expectedVersion);}
+      case 'queue.review': {const input=QueueReview.parse(payload),row=this.store.db.prepare('SELECT draft_id FROM review_queue WHERE id=?').get(input.id);if(row&&this.matching.draft(String(row.draft_id))?.requiresReview&&!guiAuthorized)throw new AppError('GUI_AUTH_REQUIRED','自然精炼文案必须在应用内对照原事实审核。');return this.matching.review(input.id,input.expectedVersion);}
       case 'queue.remove': {const input=QueueReview.parse(payload);return this.matching.remove(input.id,input.expectedVersion);}
       case 'dryrun.start': return this.dryRun(DryRunInput.parse(payload));
       case 'config.validate': case 'config.update': {
@@ -231,12 +238,19 @@ export class Application {
       case 'resume.add': return this.store.addFact(FactAdd.parse(payload));
       case 'resume.update': return this.store.updateFact(FactUpdate.parse(payload));
       case 'resume.freeze': return this.store.freezeResume(z.object({expectedVersion: z.number().int().min(1)}).strict().parse(payload).expectedVersion);
+      case 'workflow.start': return this.workflow.start(WorkflowInput.parse(payload));
+      case 'workflow.resume': return this.workflow.resume(Identifier.parse(payload).id);
+      case 'workflow.schedule.get': return this.workflow.schedule();
+      case 'workflow.schedule.save': return this.workflow.saveSchedule(ScheduleInput.parse(payload),guiAuthorized);
+      case 'search.list': return this.store.listSearch();
+      case 'search.delete': return this.store.deleteSearch(Identifier.parse(payload).id);
+      case 'search.select': {const id=Identifier.parse(payload).id;if(!this.store.getSearch(id))throw new AppError('PROFILE_NOT_FOUND','搜索方案不存在。');this.store.setSetting('selectedSearchProfile',id);return this.store.getSearch(id);}
       case 'search.get': return this.store.getSearch();
       case 'search.save': {
         if (this.active) throw new AppError('RUN_ACTIVE', '请等待或暂停当前任务后再修改方案。');
         const profile = SearchProfile.parse(payload), safeUrl = searchUrl(profile);
         if (profile.searchUrl) profile.searchUrl = safeUrl;
-        return this.store.saveSearch(profile);
+        if(!this.store.getSearch(profile.id)&&this.store.listSearch().length>=20)throw new AppError('PROFILE_LIMIT','最多保存 20 个方案。');return this.store.saveSearch(profile);
       }
       case 'jobs.list': { const result = this.store.listJobs(JobListQuery.parse(payload ?? {})); return {...result, items: result.items.map(job => ({...job, jdText: job.jdText.slice(0, 240), snapshot: ''}))}; }
       case 'jobs.get': case 'jobs.read': {
@@ -253,8 +267,8 @@ export class Application {
         const run = StartPreview.parse(payload);
         if (run.mode === 'auto') {if(this.active||this.llmBusy)throw new AppError('RUN_ACTIVE','已有任务运行中。');return this.sending.startAuto();}
         if (run.mode !== 'preview') throw new AppError('CONSENT_REQUIRED', 'Review 需要在界面检查具体岗位和最终文案后确认发送。');
-        if (run.profileId !== 'primary') throw new AppError('PROFILE_NOT_FOUND', '搜索方案不存在。');
-        return this.start('boss', run.maxJobs);
+        if (!this.store.getSearch(run.profileId)) throw new AppError('PROFILE_NOT_FOUND', '搜索方案不存在。');
+        return this.start('boss', run.maxJobs,run.profileId);
       }
       case 'run.list': return this.store.listRuns();
       case 'run.get': {
@@ -263,7 +277,7 @@ export class Application {
         return {...run, events: this.store.events(id)};
       }
       case 'run.pause': {
-        const id = Identifier.parse(payload).id;
+        const id = Identifier.parse(payload).id;this.workflow.stop(id);
         if (!this.store.getRun(id)) throw new AppError('RUN_NOT_FOUND', '任务不存在。');
         if (this.active?.id === id) { this.active.controller.abort(); this.store.event(id, 'PAUSE_REQUESTED', '已请求暂停，当前只读操作结束后停止。'); }
         if(this.chatting.busy)this.chatting.stop();
@@ -274,9 +288,11 @@ export class Application {
     }
   }
   async prepareShutdown() {
+    this.workflow.stop();
     this.active?.controller.abort();
     this.sending.pause();
     this.chatting.stop();
+    await this.workflow.close();
     await this.notifications.close();
     await this.browser.dispose();
   }

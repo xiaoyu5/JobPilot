@@ -12,9 +12,9 @@ await build({
   banner: {js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);"},
 });
 await build({entryPoints: ['packages/resume/src/thread.ts'], outfile: `${output}/resume-parser.mjs`, bundle: true, platform: 'node', target: 'node22', format: 'esm', external: ['unpdf'], banner: {js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);"}});
-const snapshot=await build({entryPoints:['packages/boss-adapter/src/snapshot.ts'],bundle:true,platform:'browser',target:'es2022',format:'iife',globalName:'JobPilotSnapshot',write:false});
+const snapshot=await build({entryPoints:['packages/boss-adapter/src/snapshot.ts'],bundle:true,minify:true,platform:'browser',target:'es2022',format:'iife',globalName:'JobPilotSnapshot',write:false});
 await writeFile(`${output}/browser-snapshot.js`,`(() => {${snapshot.outputFiles[0].text}\nreturn JSON.stringify(JobPilotSnapshot.snapshot());})()`);
-const actions=await build({entryPoints:['packages/boss-adapter/src/actions.ts'],bundle:true,platform:'browser',target:'es2022',format:'iife',globalName:'JobPilotActions',write:false});
+const actions=await build({entryPoints:['packages/boss-adapter/src/actions.ts'],bundle:true,minify:true,platform:'browser',target:'es2022',format:'iife',globalName:'JobPilotActions',write:false});
 await writeFile(`${output}/browser-actions.js`,`(() => {${actions.outputFiles[0].text}\nreturn JSON.stringify(JobPilotActions.perform(__JOBPILOT_INPUT__));})()`);
 await mkdir(`${output}/node_modules`, {recursive: true});
 await cp('node_modules/playwright-core', `${output}/node_modules/playwright-core`, {recursive: true});

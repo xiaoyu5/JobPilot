@@ -1,13 +1,18 @@
+import {advanceSearchPage} from './search-navigation.js';
+import {scrollChat} from './chat-navigation.js';
 import {snapshot} from './snapshot.js';
 import {communicationIdentity,communicationInfo,composer,contactEntries} from './communication.js';
 import {conversationSnapshot,conversationRefused} from './conversation.js';
-type Input={operation:'prepare'|'submit'|'verify'|'contact-submit'|'contact-verify'|'chat-open';jobId:string;recruiterId:string;content:string;intentId:string;deadline:number;purpose?:'default-then-ai'|'first-contact-ai'|'reply';initialMessageId?:string;expectedInboundId?:string};
+type Input={operation:'prepare'|'submit'|'verify'|'contact-submit'|'contact-verify'|'chat-open'|'chat-history'|'chat-contacts'|'search-next'|'chat-continue';reset?:boolean;jobId:string;recruiterId:string;content:string;intentId:string;deadline:number;purpose?:'default-then-ai'|'first-contact-ai'|'reply';initialMessageId?:string;expectedInboundId?:string};
 export function perform(value:unknown){
   const input=value as Input,fail=(code:string,message:string)=>({ok:false,code,message});
-  if(!input||!['prepare','submit','verify','contact-submit','contact-verify','chat-open'].includes(input.operation)||!input.recruiterId||(!input.jobId&&input.purpose!=='reply')||typeof input.content!=='string'||input.content.length>1000)return fail('INVALID_SEND_INPUT','发送上下文无效。');
+  if(!input||!['prepare','submit','verify','contact-submit','contact-verify','chat-open','chat-history','chat-contacts','search-next','chat-continue'].includes(input.operation)||!input.recruiterId||(!input.jobId&&input.purpose!=='reply')||typeof input.content!=='string'||input.content.length>1000)return fail('INVALID_SEND_INPUT','发送上下文无效。');
   const page=snapshot();if(page.state!=='LOGGED_IN')return fail(page.state==='CHALLENGE'?'BOSS_CHALLENGE':page.state==='LOGIN_REQUIRED'?'BOSS_LOGIN_REQUIRED':'ADAPTER_CHANGED','页面未处于正常登录状态。');
+  if(input.operation==='search-next'){if(!Number.isFinite(input.deadline)||Date.now()>input.deadline)return fail('ACTION_EXPIRED','读取动作已过期。');return advanceSearchPage();}
+  if(input.operation==='chat-history'||input.operation==='chat-contacts'){if(!Number.isFinite(input.deadline)||Date.now()>input.deadline)return fail('ACTION_EXPIRED','读取动作已过期。');return scrollChat(input.operation==='chat-history'?'history':'contacts',input.recruiterId,input.reset);}
   if(input.operation==='chat-open'){
-    const entries=[...document.querySelectorAll<HTMLElement>('.user-list [data-boss-id],.user-list [data-bossid],.chat-user-list [data-boss-id],.contact-list [data-boss-id]')].filter(node=>node.getClientRects().length>0&&(node.getAttribute('data-boss-id')??node.getAttribute('data-bossid'))===input.recruiterId);
+    if(!Number.isFinite(input.deadline)||Date.now()>input.deadline)return fail('ACTION_EXPIRED','读取动作已过期。');
+    const entries=[...document.querySelectorAll<HTMLElement>('.chat-user .friend-content[data-boss-id],.user-list [data-boss-id],.user-list [data-bossid],.chat-user-list [data-boss-id],.contact-list [data-boss-id]')].filter(node=>node.getClientRects().length>0&&(node.getAttribute('data-boss-id')??node.getAttribute('data-bossid'))===input.recruiterId);
     if(entries.length!==1)return fail('CHAT_NOT_VISIBLE','无法在可见联系人列表中唯一定位所选会话，请先手动打开该会话并连接只读扩展。');
     const name=entries[0].getAttribute('data-jobpilot-chat-target-name');if(name&&entries[0].querySelector('.name-text')?.textContent?.trim()!==name)return fail('CHAT_NOT_VISIBLE','联系人列表已变化，请重新读取会话。');
     entries[0].click();return {ok:true,data:{opened:true}};
@@ -15,6 +20,11 @@ export function perform(value:unknown){
   const identity=communicationIdentity();
   const chat=conversationSnapshot(),messages=chat?.messages.filter(message=>message.direction!=='system')??[];
   if((input.jobId&&(identity.jobIds.length!==1||identity.jobIds[0]!==input.jobId))||identity.recruiterIds.length!==1||(identity.recruiterIds[0]!==input.recruiterId&&!chat?.recruiterAliases?.includes(input.recruiterId)))return fail('TARGET_MISMATCH','当前岗位或招聘人与已确认目标不一致。');
+  if(input.operation==='chat-continue'){
+    if(!Number.isFinite(input.deadline)||Date.now()>input.deadline)return fail('ACTION_EXPIRED','导航动作已过期。');
+    const entries=contactEntries();if(entries.length!==1||entries[0].textContent?.trim()!=='继续沟通'||entries[0].matches(':disabled,[aria-disabled="true"],.disabled'))return fail('ALREADY_CONTACTED','仅允许点击明确的继续沟通入口，绝不点击立即沟通。');
+    entries[0].click();return {ok:true,data:{opened:true}};
+  }
   if(input.operation==='verify'||input.operation==='contact-verify'){
     // Legacy greeting modal fixtures also expose messages within the job scope.
     const roots=chat?[]:[...document.querySelectorAll<HTMLElement>('.message-item.is-self,.message-item.sent,.message-item.mine,.chat-message.is-self')];

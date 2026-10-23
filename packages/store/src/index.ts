@@ -1,3 +1,4 @@
+import {SearchProfile} from '@jobpilot/contracts';
 import { DatabaseSync } from 'node:sqlite';
 import { chmodSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -102,7 +103,7 @@ export class Store {
     const chatUncertain=this.db.prepare("UPDATE chat_outbox SET state='NEEDS_VERIFY',version=version+1,detail='回复期间进程中断，禁止自动重发。' WHERE state='SENDING'").run();
     if(chatUncertain.changes)this.setSetting('sendEmergencyStop',true);
     if (!this.getSetting('config')) this.setSetting('config', {version: 1, llm: null, bossReadOnlyConsent: false});
-    if (!this.getSearch()) this.saveSearch({id: 'primary', name: 'iOS 搜索方案', keyword: 'iOS', searchUrl: '', maxJobs: 20});
+    if (!this.getSearch('primary')) this.saveSearch({id: 'primary', name: 'iOS 搜索方案', keyword: 'iOS', searchUrl: '', maxJobs: 20});
     if (!this.getSetting('resumeVersion')) this.setSetting('resumeVersion', 1);
     const uncertain=this.db.prepare("UPDATE send_outbox SET state='NEEDS_VERIFY',version=version+1,verify_detail='进程在发送期间中断，禁止自动重发。' WHERE state='SENDING'").run();
     if(uncertain.changes)this.setSetting('sendEmergencyStop',true);
@@ -213,9 +214,11 @@ export class Store {
     this.db.prepare(`UPDATE greeting_drafts SET stale=1,audit_status='INVALIDATED'${clause}`).run(...args);
     this.db.prepare(`UPDATE review_queue SET state='STALE',version=version+1,reviewed_at=NULL${clause}`).run(...args);
   }
-  getSearch(): SearchProfileData | null {
-    const row = this.db.prepare("SELECT filters_json FROM search_profiles WHERE id='primary'").get() as Row | undefined;
-    return row ? JSON.parse(row.filters_json) : null;
+  listSearch(){return (this.db.prepare('SELECT filters_json FROM search_profiles ORDER BY updated_at DESC,id').all() as Row[]).map(row=>SearchProfile.parse(JSON.parse(row.filters_json)));}
+  deleteSearch(id:string){if(id==='primary')throw new AppError('DEFAULT_PROFILE','默认方案不能删除。');this.db.prepare('DELETE FROM search_profiles WHERE id=?').run(id);if(this.getSetting('selectedSearchProfile')===id)this.setSetting('selectedSearchProfile','primary');return {deleted:true};}
+  getSearch(id=this.getSetting<string>('selectedSearchProfile')??'primary'): SearchProfileData | null {
+    const row = this.db.prepare('SELECT filters_json FROM search_profiles WHERE id=?').get(id) as Row | undefined;
+    return row ? SearchProfile.parse(JSON.parse(row.filters_json)) : null;
   }
   saveSearch(profile: SearchProfileData) {
     this.db.prepare('INSERT INTO search_profiles VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,filters_json=excluded.filters_json,updated_at=excluded.updated_at').run(profile.id, profile.name, JSON.stringify(profile), now());

@@ -1,3 +1,4 @@
+import {collectSearchPages} from './search-pages.js';
 import { spawn, execFile, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import { mkdir, chmod, readlink, access } from 'node:fs/promises';
@@ -12,7 +13,7 @@ export function ownsChromeCommand(command:string,profilePath:string){
   const value=command.trim(),argument=`--user-data-dir=${profilePath}`;
   return value.startsWith('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome ')&&(value.includes(`${argument} `)||value.endsWith(argument));
 }
-type Snapshot = LoginState & {filters?:Record<string,string>;cards?:ReturnType<typeof extractSearchDom>;detail?:ReturnType<typeof extractDetailDom>;empty?:boolean;structure?:unknown;conversation?:ConversationSnapshot;communication?:{entryKind:ContactKind;jobIds:string[];recruiterIds:string[];composerReady:boolean;canOpenPreview:boolean;alreadyContacted:boolean;message:string}};
+type Snapshot = LoginState & {filters?:Record<string,string>;cards?:ReturnType<typeof extractSearchDom>;detail?:ReturnType<typeof extractDetailDom>;empty?:boolean;structure?:unknown;conversation?:ConversationSnapshot;chatTargets?:{recruiterId:string;name:string;company:string}[];communication?:{entryKind:ContactKind;jobIds:string[];recruiterIds:string[];composerReady:boolean;canOpenPreview:boolean;alreadyContacted:boolean;message:string}};
 export class NativeChrome {
   readonly profilePath:string;
   private pid:number|undefined;
@@ -51,7 +52,7 @@ export class NativeChrome {
     throw new AppError('CHROME_UNAVAILABLE','无法启动专用 Chrome，请检查目录是否被占用。');
   }
   open(){return this.serial(async()=>{await this.ensureOpen();return this.status();});}
-  private async command(operation:'ready'|'read'|'navigate'|'scroll'|'greeting-prepare'|'greeting-submit'|'greeting-verify'|'greeting-contact-submit'|'greeting-contact-verify'|'greeting-chat-open',url?:string,payload?:unknown,signal?:AbortSignal):Promise<any>{
+  private async command(operation:'ready'|'read'|'navigate'|'scroll'|'greeting-prepare'|'greeting-submit'|'greeting-verify'|'greeting-contact-submit'|'greeting-contact-verify'|'greeting-chat-open'|'greeting-chat-history'|'greeting-chat-contacts'|'greeting-search-next'|'greeting-chat-continue',url?:string,payload?:unknown,signal?:AbortSignal):Promise<any>{
     if(!this.alive()||await this.profilePid()!==this.pid)throw new AppError('BROWSER_CLOSED','专用 Chrome 已关闭，请重新打开。');
     let helper=join(dirname(process.execPath),'jobpilot-browser');
     if(!await access(helper).then(()=>true,()=>false))helper=resolve('apps/desktop/src-tauri/binaries/jobpilot-browser-aarch64-apple-darwin');
@@ -82,13 +83,14 @@ export class NativeChrome {
     for(let i=0;i<25;i++){signal.throwIfAborted();await wait(400);snapshot=await this.read();if(snapshot.state==='CHALLENGE'||snapshot.state==='LOGIN_REQUIRED')this.requireLogin(snapshot);if(snapshot.state==='LOGGED_IN'&&snapshot.url===expected.origin+expected.pathname&&[...expected.searchParams].every(([key,value])=>snapshot!.filters?.[key]===value)&&(snapshot.cards?.length||snapshot.empty))break;}
     if(!snapshot)throw new AppError('ADAPTER_CHANGED','未读取到搜索结果。');this.requireLogin(snapshot);
     if(snapshot.url!==expected.origin+expected.pathname||![...expected.searchParams].every(([key,value])=>snapshot!.filters?.[key]===value))throw new AppError('ADAPTER_CHANGED','搜索页尚未切换到保存的筛选条件，已停止读取。');
-    const seen=new Set<string>();
-    for(let attempt=0;attempt<4;attempt++){
-      for(const raw of snapshot.cards??[]){signal.throwIfAborted();const job=normalizeCard(raw);if(seen.has(job.id))continue;seen.add(job.id);onJob(job);if(seen.size>=profile.maxJobs)return seen.size;}
-      if(snapshot.empty||attempt===3)break;
-      await this.command('scroll');await wait(900);signal.throwIfAborted();snapshot=await this.read();this.requireLogin(snapshot);
-    }
-    if(!seen.size&&!snapshot.empty)throw new AppError('ADAPTER_CHANGED','未识别到岗位卡片或明确的空结果，已停止读取。');return seen.size;
+    const current=async()=>{const page=await this.read();this.requireLogin(page);if(page.url!==expected.origin+expected.pathname||![...expected.searchParams].every(([key,value])=>page.filters?.[key]===value))throw new AppError('ADAPTER_CHANGED','采集期间搜索条件变化，已停止。');return page;};
+    return collectSearchPages(profile,signal,current,async()=>{await this.command('scroll',undefined,undefined,signal);await wait(900);},async()=>{
+      const signature=JSON.stringify((await current()).cards?.map(card=>card.url));
+      const action=await this.command('greeting-search-next',undefined,{jobId:'',recruiterId:'readonly',content:'',purpose:'reply',intentId:'read-only',deadline:Date.now()+3000},signal);
+      if(!action.advanced)return false;
+      for(let i=0;i<20;i++){signal.throwIfAborted();await wait(400);const page=await current();if(page.empty||JSON.stringify(page.cards?.map(card=>card.url))!==signature)return true;}
+      throw new AppError('ADAPTER_CHANGED','点击下一页后未确认结果更新，已停止。');
+    },onJob);
   });}
   readJob(job:JobRecord,signal?:AbortSignal){return this.serial(async()=>{
     if(job.source!=='boss'||!/^https:\/\/www\.zhipin\.com\/job_detail\/[a-zA-Z0-9_-]+\.html$/.test(job.url))throw new AppError('INVALID_JOB_URL','无效的 BOSS 岗位链接。');
@@ -114,17 +116,40 @@ export class NativeChrome {
   verifyGreeting(job:JobRecord,content:string,signal:AbortSignal):Promise<SendVerification>{return this.serial(async()=>{let result:SendVerification={state:'UNKNOWN',message:'未确认消息，请人工核验。'};for(let i=0;i<10;i++){signal.throwIfAborted();result=await this.command('greeting-verify',undefined,this.sendPayload(job,content,'read-only-verification'),signal);if(result.state==='CONFIRMED')return result;await wait(700);}return result;});}
   startContact(job:JobRecord,signal:AbortSignal,intentId:string){return this.serial(async()=>{signal.throwIfAborted();const result=await this.command('greeting-contact-submit',undefined,{...this.sendPayload(job,'',intentId),purpose:'default-then-ai'},signal);if(!result.submitted)throw new AppError('NEEDS_VERIFY','首次沟通提交结果未知。');});}
   verifyContact(job:JobRecord,signal:AbortSignal):Promise<SendVerification>{return this.serial(async()=>{let result:SendVerification={state:'UNKNOWN',message:'默认招呼未确认。'};for(let i=0;i<10;i++){signal.throwIfAborted();result=await this.command('greeting-contact-verify',undefined,this.sendPayload(job,'','verify-contact'),signal);if(result.state==='CONFIRMED')return result;await wait(700);}return result;});}
+  async openExistingChat(job:JobRecord,signal:AbortSignal){
+    const fresh=await this.readJob(job,signal);if(!fresh.alreadyContacted||!fresh.recruiterId)throw new AppError('ALREADY_CONTACTED','请先核对已沟通状态和招聘人标识。');
+    return this.serial(async()=>{await this.command('greeting-chat-continue',undefined,{jobId:fresh.platformJobId,recruiterId:fresh.recruiterId,content:'',intentId:'read-only-continue',deadline:Date.now()+3000},signal);for(let i=0;i<20;i++){signal.throwIfAborted();await wait(400);const page=await this.read();this.requireLogin(page);if(page.url==='https://www.zhipin.com/web/geek/chat')return this.state(page);}throw new AppError('ADAPTER_CHANGED','尚未确认进入消息页，请人工查看；未执行发送。');});
+  }
   openChats(){return this.serial(async()=>{await this.ensureOpen();await this.command('navigate','https://www.zhipin.com/web/geek/chat');await wait(1200);return this.state(await this.read());});}
+  private chatAction(operation:'greeting-chat-open'|'greeting-chat-history'|'greeting-chat-contacts',recruiterId:string,signal:AbortSignal,reset=false){return this.command(operation,undefined,{jobId:'',recruiterId,content:'',purpose:'reply',intentId:'read-only',deadline:Date.now()+3000,reset},signal);}
+  discoverConversations(signal:AbortSignal){return this.serial(async()=>{
+    const targets=new Map<string,{recruiterId:string;name:string;company:string}>();
+    let page=await this.read();this.requireLogin(page);
+    if(page.url!=='https://www.zhipin.com/web/geek/chat')throw new AppError('CHAT_PAGE_REQUIRED','请先打开消息页并连接只读扩展。');
+    await this.chatAction('greeting-chat-contacts','readonly',signal,true);
+    for(let i=0;i<10;i++){signal.throwIfAborted();await wait(200);page=await this.read();this.requireLogin(page);for(const target of page.chatTargets??[])targets.set(target.recruiterId,target);if(targets.size>=100)break;if(!(await this.chatAction('greeting-chat-contacts','readonly',signal)).scrolled)break;}
+    return [...targets.values()].slice(0,100);
+  });}
   readConversation(signal:AbortSignal,target?:ConversationSnapshot):Promise<ConversationSnapshot>{return this.serial(async()=>{
-    signal.throwIfAborted();let snapshot=await this.read();this.requireLogin(snapshot);
-    if(target&&snapshot.conversation?.recruiterId!==target.recruiterId){
-      // Stay in the connected chat page: full navigation would discard activeTab's
-      // user-enabled bridge and silently break the next authorized conversation.
-      await this.command('greeting-chat-open',undefined,{jobId:'',recruiterId:target.recruiterId,content:'',purpose:'reply',intentId:'read-only-open',deadline:Date.now()+3000},signal);
-      for(let i=0;i<15;i++){signal.throwIfAborted();await wait(400);snapshot=await this.read();this.requireLogin(snapshot);if(snapshot.conversation?.recruiterId===target.recruiterId)break;}
+    signal.throwIfAborted();let page=await this.read();this.requireLogin(page);
+    if(target&&page.conversation?.recruiterId!==target.recruiterId){
+      await this.chatAction('greeting-chat-contacts','readonly',signal,true);
+      let found=false;
+      for(let i=0;i<10;i++){signal.throwIfAborted();await wait(200);page=await this.read();this.requireLogin(page);if(page.chatTargets?.some(row=>row.recruiterId===target.recruiterId&&row.name===target.name)){found=true;break;}if(!(await this.chatAction('greeting-chat-contacts','readonly',signal)).scrolled)break;}
+      if(!found)throw new AppError('CHAT_NOT_VISIBLE','在有上限的联系人列表中未找到原目标，已停止。');
+      await this.chatAction('greeting-chat-open',target.recruiterId,signal);
+      for(let i=0;i<15;i++){signal.throwIfAborted();await wait(400);page=await this.read();this.requireLogin(page);if(page.conversation?.recruiterId===target.recruiterId)break;}
     }
-    if(!snapshot.conversation?.identityBound)throw new AppError('CHAT_IDENTITY_UNKNOWN','请在专用 Chrome 打开一个能可靠确认身份的聊天会话。');
-    if(target&&snapshot.conversation.id!==target.id)throw new AppError('TARGET_MISMATCH','切换后会话身份不符。');return snapshot.conversation;
+    if(!page.conversation?.identityBound)throw new AppError('CHAT_IDENTITY_UNKNOWN','请在专用 Chrome 打开一个能可靠确认身份的聊天会话。');
+    const id=page.conversation.recruiterId;
+    if(target&&page.conversation.id!==target.id)throw new AppError('TARGET_MISMATCH','切换后会话身份不符。');
+    // Bounded normal UI history loading. Never infer completeness from a timeout.
+    for(let i=0;i<8&&!page.conversation?.historyComplete;i++){
+      if(page.conversation?.messages.length!>=100||page.conversation?.url.includes('/job_detail/'))break;
+      signal.throwIfAborted();await this.chatAction('greeting-chat-history',id,signal);await wait(400);page=await this.read();this.requireLogin(page);
+      if(page.conversation?.recruiterId!==id)throw new AppError('TARGET_MISMATCH','加载期间会话改变，已停止。');
+    }
+    return page.conversation!;
   });}
   private replyPayload(chat:ConversationSnapshot,content:string,intentId:string,inboundId:string){return {jobId:chat.jobId??'',recruiterId:chat.recruiterId,content,intentId,expectedInboundId:inboundId,purpose:'reply',deadline:Date.now()+3000};}
   prepareReply(chat:ConversationSnapshot,content:string,inboundId:string,signal:AbortSignal,intentId:string){return this.serial(async()=>{const result=await this.command('greeting-prepare',undefined,this.replyPayload(chat,content,intentId,inboundId),signal);if(!result.prepared)throw new AppError('ADAPTER_CHANGED','会话编辑器未准备好。');});}

@@ -1,10 +1,17 @@
 {
   "manifest_version": 3,
   "name": "JobPilot BOSS 只读连接",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "仅在手动点击后，将当前 BOSS 页面已渲染的业务标识提供给本机 JobPilot；不发送消息。",
   "minimum_chrome_version": "111",
-  "permissions": ["activeTab", "scripting"],
-  "action": {"default_popup": "popup.html"},
-  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'"}
+  "permissions": [
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'none'"
+  }
 }

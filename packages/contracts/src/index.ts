@@ -7,12 +7,12 @@ export const RpcRequest = z.object({
   guiToken: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   action: z.enum(['status', 'browser.open', 'browser.close', 'llm.test', 'run.start', 'shutdown',
     'config.get', 'config.validate', 'config.update', 'resume.import', 'resume.list', 'resume.add', 'resume.update', 'resume.freeze',
-    'search.get', 'search.save', 'jobs.list', 'jobs.get', 'jobs.read', 'boss.login.open', 'boss.login.status',
+    'search.get', 'search.save','search.list','search.select','search.delete','workflow.start','workflow.resume','workflow.schedule.get','workflow.schedule.save', 'jobs.list', 'jobs.get', 'jobs.read', 'boss.login.open', 'boss.login.status',
     'run.list', 'run.get', 'run.pause', 'demo.load', 'dashboard.get', 'boss.diagnostics',
     'policy.get', 'policy.save', 'analysis.get', 'analysis.analyze', 'draft.generate', 'draft.update',
     'queue.list', 'queue.add', 'queue.review', 'queue.remove', 'dryrun.start', 'llm.env.load','llm.env.save',
     'send.status','send.policy.save','send.auto.set','send.prepare','send.commit','send.followup.prepare','send.followup.commit','send.stop','send.resume',
-    'send.outbox','send.verify','send.resolve','send.reset','send.cancel','send.checkpoint','boss.communication.inspect','chat.open','chat.scan','chat.list','chat.prepare','chat.commit','chat.auto.set','chat.auto.tick','chat.outbox','chat.resolve',
+    'send.outbox','send.verify','send.resolve','send.reset','send.cancel','send.checkpoint','boss.communication.inspect','chat.open','chat.scan','chat.inbox.scan','chat.watch.set','chat.list','chat.prepare','chat.commit','chat.auto.set','chat.auto.tick','chat.outbox','chat.resolve',
     'outcomes.list','outcomes.update','stats.get','diagnostics.export','data.status','data.backup','data.restore.prepare','data.restore.commit','data.reset','data.cleanup.preview','data.cleanup.commit','data.retention.save','data.operation.cancel',
     'notifications.status','notifications.save','notifications.test','notifications.check']),
   payload: z.unknown().optional(),
@@ -46,12 +46,12 @@ export const ResumeFile = z.object({path: z.string().min(1).max(4096)}).strict()
 export const ResumeImport = ResumeFile.extend({mode:z.enum(['merge','replace-imported']).default('merge'),expectedVersion:z.number().int().min(1).optional()}).strict().refine(v=>v.mode!=='replace-imported'||v.expectedVersion!==undefined,'替换旧简历需核对事实库版本');
 export const FactAdd = z.object({expectedVersion:z.number().int().min(1),text:z.string().trim().min(5).max(2000),category:FactCategory.default('skill'),sourceQuote:z.string().trim().min(1).max(4000).optional()}).strict();
 export const FactUpdate = z.object({id: z.string().uuid(), expectedVersion: z.number().int().min(1), text: z.string().trim().min(1).max(2000).optional(), category: FactCategory.optional(), approved: z.boolean().optional(), deleted: z.boolean().optional()}).strict();
-export const SearchProfile = z.object({id: z.literal('primary').default('primary'), name: z.string().trim().min(1).max(80), keyword: z.string().trim().min(1).max(80), searchUrl: z.string().max(2048).default(''), maxJobs: z.number().int().min(1).max(50).default(20)}).strict();
+export const SearchProfile = z.object({id: z.string().regex(/^[a-zA-Z0-9_-]{1,100}$/).default('primary'), name: z.string().trim().min(1).max(80), keyword: z.string().trim().min(1).max(80), searchUrl: z.string().max(2048).default(''), maxJobs: z.number().int().min(1).max(50).default(20),maxPages:z.number().int().min(1).max(10).optional(),maxScrolls:z.number().int().min(1).max(20).optional()}).strict();
 export type SearchProfileData = z.infer<typeof SearchProfile>;
 export const JobListQuery = z.object({source: z.enum(['boss', 'demo']).optional(), query: z.string().max(100).optional(), status: z.enum(['UNASSESSED','SKIP_RULE','RECOMMEND','REVIEW','SKIP']).optional(), minScore: z.number().int().min(0).max(100).optional(), limit: z.number().int().min(1).max(100).default(50), offset: z.number().int().min(0).max(10000).default(0)}).strict();
 export type JobSource = 'boss' | 'demo';
 export type JobRecord = {id: string; platformJobId: string; recruiterId: string | null; source: JobSource; title: string; company: string; salary: string; city: string; experience: string; education: string; url: string; jdText: string; jdHash: string; fetchedAt: string; snapshot: string; alreadyContacted: boolean};
-export type RunRecord = {id: string; profileId: string; mode: 'preview'|'review'|'auto'; source: JobSource; kind: 'collection' | 'dry-run'|'send'|'chat'; state: 'DISCOVERING' | 'ANALYZING' | 'DRAFTING' | 'PREFLIGHT'|'SENDING'|'VERIFYING'|'COMPLETED' | 'PAUSED' | 'NEEDS_HUMAN' | 'FAILED'; discoveredCount: number; processedCount: number; draftedCount: number; skippedCount: number; sentCount: number; needsVerifyCount: number; startedAt: string; finishedAt: string | null; errorCode: string | null};
+export type RunRecord = {id: string; profileId: string; mode: 'preview'|'review'|'auto'; source: JobSource; kind: 'collection' | 'dry-run'|'send'|'chat'|'workflow'; state: 'DISCOVERING' | 'ANALYZING' | 'DRAFTING' | 'PREFLIGHT'|'SENDING'|'VERIFYING'|'COMPLETED' | 'PAUSED' | 'NEEDS_HUMAN' | 'FAILED'; discoveredCount: number; processedCount: number; draftedCount: number; skippedCount: number; sentCount: number; needsVerifyCount: number; startedAt: string; finishedAt: string | null; errorCode: string | null};
 export type RunEvent = {id: number; runId: string; traceId: string; type: string; message: string; createdAt: string};
 export type LoginState = {state: 'CLOSED' | 'LOGIN_REQUIRED' | 'LOGGED_IN' | 'CHALLENGE' | 'UNKNOWN'; message: string; url: string | null};
 export type Dashboard = {totalJobs: number; bossJobs: number; demoJobs: number; approvedFacts: number; pendingFacts: number; lastRun: RunRecord | null};
@@ -90,15 +90,15 @@ export type Assessment = Omit<MatchReport,'score'|'decision'> & {
   source: 'rule' | 'llm'; model: string; promptVersion: string; resumeVersion: number;
   jdHash: string; contextKey: string; stale: boolean; createdAt: string;
 };
-export type EvidenceStatement = {id: string; factId: string; text: string};
+export type EvidenceStatement = {id: string; factId: string; text: string; sourceText?:string};
 export const GreetingPlan = z.object({
   opening: z.enum(['interest','direction']), statementIds: z.array(z.string().min(1).max(100)).min(1).max(2),
   closing: z.enum(['discuss','team']),
 }).strict();
-export type Draft = {id: string; jobId: string; assessmentId: string; content: string; factIds: string[]; statements: EvidenceStatement[]; resumeVersion: number; jdHash: string; model: string; promptVersion: string; version: number; manualOverride: boolean; audit: {status: 'PASS'|'BLOCK'; issues: string[]}; stale: boolean; createdAt: string};
+export type Draft = {id: string; jobId: string; assessmentId: string; content: string; factIds: string[]; statements: EvidenceStatement[]; resumeVersion: number; jdHash: string; model: string; promptVersion: string; version: number; manualOverride: boolean; requiresReview?:boolean; audit: {status: 'PASS'|'BLOCK'; issues: string[]}; stale: boolean; createdAt: string};
 export type QueueItem = {id: string; jobId: string; title: string; company: string; source: JobSource; draftId: string; version: number; state: 'PENDING'|'REVIEWED'|'BLOCKED'|'STALE'; createdAt: string; reviewedAt: string|null; draft: Draft; assessment: Assessment;delivery?:{id:string;state:string}};
 export const AnalyzeInput = z.object({jobId: z.string().min(1).max(200), resumeVersion: z.number().int().min(1).optional()}).strict();
-export const DraftInput = z.object({jobId: z.string().min(1).max(200), style: z.enum(['natural','concise']).default('natural')}).strict();
+export const DraftInput = z.object({jobId: z.string().min(1).max(200), style: z.enum(['natural','concise','rewrite']).default('natural')}).strict();
 export const QueueInput = z.object({jobId: z.string().min(1).max(200), draftId: z.string().uuid()}).strict();
 export const DraftUpdate = z.object({id: z.string().uuid(), expectedVersion: z.number().int().min(1), content: z.string().trim().min(1).max(1000)}).strict();
 export const QueueReview = z.object({id: z.string().uuid(), expectedVersion: z.number().int().min(1)}).strict();

@@ -44,6 +44,7 @@ npm run verify:ui:m4
 npm run verify:ui:notifications
 npm run verify:ui:m4.4
 npm run verify:ui:followup
+npm run verify:ui:closeout
 # 发布版 App 的恢复/重置启动流程与两个 MCP 客户端兼容检查（匿名数据）
 npm run verify:bundle:m4
 # 捆绑 Worker + MCP 匹配/草稿/审核队列/Dry Run + 重启缓存
